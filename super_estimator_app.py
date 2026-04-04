@@ -122,9 +122,9 @@ def main():
     # --- Descriptive Name Mapping ---
     strat_names = {
         'Strat_50_50_CAGR': '50% Gold - 50% UPRO',
-        'Strat_15_15_70_CAGR': '15% Gold - 15% UPRO - 70% SPY',
+        'Strat_15_15_70_CAGR': '15% Gold - 15% UPRO - 70% S&P 500',
         'UPRO_CAGR': '100% UPRO',
-        'SPY_CAGR': '100% SPY'
+        'SPY_CAGR': '100% S&P 500'
     }
 
     # Plotly Histogram
