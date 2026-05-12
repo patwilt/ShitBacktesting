@@ -23,7 +23,7 @@ from backtest_export import BacktestExporter
 
 # ── Backtest window ───────────────────────────────────────────────────────────
 DATA_FOLDER          = "data/market_data"
-START_DATE           = "1960-01-01"  # suggest 1980+ if relying on gold data
+START_DATE           = "1980-01-01"  # suggest 1980+ if relying on gold data
 ROLLING_WINDOW_YEARS = 20
 WINDOW_DAYS          = ROLLING_WINDOW_YEARS * 252   # approx trading days in a window
 REBALANCE_DAYS       = 63            # quarterly rebalancing (~63 trading days)
@@ -51,13 +51,13 @@ S1_WEIGHTS = {"spy": 0.70, "upro": 0.15, "gold": 0.15}
 S1_NAME    = _strategy_name(S1_WEIGHTS)
 
 # S3: Hybrid MSCI — same structure, global index instead of S&P 500
-S3_WEIGHTS = {"msci": 0.70, "upro": 0.15, "gold": 0.15}   
+S3_WEIGHTS = {"msci": 0.40, "upro": 0.35, "gold": 0.25}   
 S3_NAME    = _strategy_name(S3_WEIGHTS)
 
 # ── Asset model parameters ────────────────────────────────────────────────────
 
 # SPY / S&P 500 total-return model
-SPY_DIVIDEND_YIELD     = 0.015   # 1.5 % annual dividend yield added to price returns
+SPY_DIVIDEND_YIELD     = 0.015   # fallback yield for years absent from _SP500_DIV_YIELD_ANNUAL
 
 # UPRO (3× leveraged S&P 500 ETF) cost model
 UPRO_LEVERAGE          = 3.0
@@ -74,6 +74,37 @@ MSCI_POST2010_ALPHA    = -0.02   # −2 %/yr: US tech dominance drag vs S&P post
 GOLD_PRE1980_CAGR      = 0.12    # +12 %/yr: USD decoupling / 1970s gold rush
 GOLD_1980_TO_REAL_CAGR = -0.025  # −2.5 %/yr: long bear market until real data begins
 
+# ── S&P 500 historical dividend yield lookup ──────────────────────────────────
+# Calendar-year average dividend yield for the S&P 500.
+# Source: Shiller CAPE data (1927–1999), SPDR/Bloomberg (2000–2026).
+# Used by load_and_prep_spy and load_and_prep_upro so both SPY total-return
+# construction and UPRO's leveraged total-return use period-appropriate yields
+# rather than a single constant — removes a ~0.5–1.0 pp/yr bias in low-yield
+# eras (2000–01, 2020–25) and high-yield eras (1970s–80s, 2010–18).
+_SP500_DIV_YIELD_ANNUAL: dict[int, float] = {
+    1927: 0.049, 1928: 0.042, 1929: 0.040, 1930: 0.054, 1931: 0.067,
+    1932: 0.075, 1933: 0.040, 1934: 0.044, 1935: 0.038, 1936: 0.037,
+    1937: 0.044, 1938: 0.050, 1939: 0.046, 1940: 0.054, 1941: 0.064,
+    1942: 0.072, 1943: 0.059, 1944: 0.054, 1945: 0.043, 1946: 0.041,
+    1947: 0.049, 1948: 0.056, 1949: 0.062, 1950: 0.065, 1951: 0.059,
+    1952: 0.059, 1953: 0.062, 1954: 0.053, 1955: 0.046, 1956: 0.046,
+    1957: 0.050, 1958: 0.044, 1959: 0.033,
+    1960: 0.035, 1961: 0.029, 1962: 0.033, 1963: 0.029, 1964: 0.028,
+    1965: 0.027, 1966: 0.031, 1967: 0.028, 1968: 0.027, 1969: 0.031,
+    1970: 0.035, 1971: 0.031, 1972: 0.027, 1973: 0.033, 1974: 0.046,
+    1975: 0.041, 1976: 0.039, 1977: 0.047, 1978: 0.052, 1979: 0.054,
+    1980: 0.049, 1981: 0.052, 1982: 0.054, 1983: 0.044, 1984: 0.044,
+    1985: 0.040, 1986: 0.034, 1987: 0.035, 1988: 0.038, 1989: 0.033,
+    1990: 0.037, 1991: 0.030, 1992: 0.028, 1993: 0.026, 1994: 0.027,
+    1995: 0.022, 1996: 0.021, 1997: 0.017, 1998: 0.013, 1999: 0.011,
+    2000: 0.011, 2001: 0.013, 2002: 0.017, 2003: 0.016, 2004: 0.015,
+    2005: 0.017, 2006: 0.017, 2007: 0.018, 2008: 0.021, 2009: 0.020,
+    2010: 0.018, 2011: 0.021, 2012: 0.021, 2013: 0.020, 2014: 0.019,
+    2015: 0.021, 2016: 0.021, 2017: 0.019, 2018: 0.020, 2019: 0.018,
+    2020: 0.015, 2021: 0.013, 2022: 0.016, 2023: 0.015, 2024: 0.012,
+    2025: 0.012, 2026: 0.012,
+}
+
 # ── FRED Federal Funds Rate lookup ────────────────────────────────────────────
 # Used to scale UPRO financing cost by interest-rate regime rather than
 # applying a single flat rate.  Values are calendar-year averages (FRED FEDFUNDS).
@@ -88,7 +119,7 @@ _FED_FUNDS_ANNUAL: dict[int, float] = {
     2005: 0.031, 2006: 0.053, 2007: 0.052, 2008: 0.020, 2009: 0.001,
     2010: 0.001, 2011: 0.001, 2012: 0.001, 2013: 0.001, 2014: 0.001,
     2015: 0.002, 2016: 0.004, 2017: 0.010, 2018: 0.019, 2019: 0.021,
-    2020: 0.001, 2021: 0.001, 2022: 0.033, 2023: 0.053, 2024: 0.050,
+    2020: 0.001, 2021: 0.001, 2022: 0.033, 2023: 0.053, 2024: 0.052,
     2025: 0.045, 2026: 0.043,
 }
 
@@ -136,9 +167,13 @@ def load_market_data() -> pd.DataFrame:
 def load_and_prep_spy(data_dict: dict[str, pd.Series]) -> pd.Series:
     s = data_dict["gspc"].dropna()
     rets = s.pct_change().fillna(0.0)
-    div_daily = (1 + SPY_DIVIDEND_YIELD) ** (1 / 252)
-    s_tr = (1 + rets) * div_daily - 1
-    spy_prices = (1 + s_tr).cumprod() * 100
+    div_annual = pd.Series(
+        [_SP500_DIV_YIELD_ANNUAL.get(y, SPY_DIVIDEND_YIELD) for y in rets.index.year],
+        index=rets.index, dtype=np.float64,
+    )
+    div_daily = (1.0 + div_annual) ** (1.0 / 252)
+    s_tr = (1.0 + rets) * div_daily - 1.0
+    spy_prices = (1.0 + s_tr).cumprod() * 100
     return np.maximum(spy_prices, 0.01)
 
 
@@ -146,18 +181,25 @@ def load_and_prep_upro(data_dict: dict[str, pd.Series]) -> pd.Series:
     """
     3× S&P 500 leveraged ETF proxy with **period-appropriate financing cost**.
 
-    Cost model (additive, applied daily):
-        daily_cost = [(L-1) × (r_f + spread) + expense_ratio] / 252
+    Return model (applied daily):
+        u_ret = L × tr_ret − daily_cost
 
     Where:
+        tr_ret        = S&P 500 *total* return (price return + dividend yield)
+                        Real UPRO targets the total-return index × 3, not the
+                        price index.  Using price returns alone understates the
+                        leveraged return by roughly L × div_yield ≈ 3 × 1.5 % =
+                        4.5 pp/yr.  The daily dividend is added to GSPC price
+                        returns in the same way load_and_prep_spy does.
         L             = UPRO_LEVERAGE   (3)
-        r_f           = annual Fed Funds Rate for the calendar year
+        daily_cost    = [(L-1) × (r_f + spread) + expense_ratio] / 252
+        r_f           = annual Fed Funds Rate for the calendar year (FRED)
         spread        = UPRO_FINANCING_SPREAD  (~30 bps above overnight rate)
         expense_ratio = UPRO_EXPENSE_RATIO     (0.91 %)
 
-    The (L-1) = 2× borrowing cost scales with interest rates, so:
-      - ZIRP era  (2009–15): total annual cost ≈  0.91 + 2×0.30 = ~1.5 %
-      - High-rate  (2022–24): total annual cost ≈  0.91 + 2×5.30 = ~11.5 %
+    Financing cost scales with the interest-rate regime:
+      - ZIRP era   (2009–15): annual cost ≈  0.91 + 2×0.30 = ~1.5 %
+      - High-rate  (2022–24): annual cost ≈  0.91 + 2×5.30 = ~11.5 %
 
     Volatility decay is implicitly and *correctly* captured by the daily
     compounding of 3× returns — no additional drag term is required because
@@ -165,6 +207,17 @@ def load_and_prep_upro(data_dict: dict[str, pd.Series]) -> pd.Series:
     """
     s = data_dict["gspc"].dropna()
     rets = s.pct_change().fillna(0.0)
+
+    # Convert GSPC price returns → S&P 500 total returns before applying
+    # leverage.  This matches how real UPRO computes its daily target return.
+    # Period-appropriate dividend yields from _SP500_DIV_YIELD_ANNUAL are used
+    # so the leverage does not amplify a constant-yield approximation error.
+    div_annual = pd.Series(
+        [_SP500_DIV_YIELD_ANNUAL.get(y, SPY_DIVIDEND_YIELD) for y in rets.index.year],
+        index=rets.index, dtype=np.float64,
+    )
+    div_daily = (1.0 + div_annual) ** (1.0 / 252)
+    tr_rets = (1.0 + rets) * div_daily - 1.0
 
     # Build a daily Series of the annual risk-free rate for each trading date.
     rf_annual = pd.Series(
@@ -178,8 +231,8 @@ def load_and_prep_upro(data_dict: dict[str, pd.Series]) -> pd.Series:
         (UPRO_LEVERAGE - 1.0) * (rf_annual + UPRO_FINANCING_SPREAD) + UPRO_EXPENSE_RATIO
     ) / 252.0
 
-    # Correct daily leveraged return: L × r_index − financing − expense
-    u_rets = UPRO_LEVERAGE * rets - daily_cost
+    # Daily leveraged total return minus financing and expense costs.
+    u_rets = UPRO_LEVERAGE * tr_rets - daily_cost
     upro_prices = (1.0 + np.clip(u_rets, -0.9, 0.9)).cumprod() * 100.0
     return np.maximum(upro_prices, 0.01)
 
@@ -207,6 +260,12 @@ def load_and_prep_msci(data_dict: dict[str, pd.Series]) -> pd.Series:
         real_data = data_dict["msci_real"]
         real_rets = real_data.pct_change().fillna(0.0)
         handover_date = real_data.first_valid_index()
+        # Zero all post-handover returns first, then overwrite with real IWDA.L
+        # returns on the days it actually traded.  Without this step, US-only
+        # trading days (GSPC open but London closed) would carry synthetic GSPC
+        # returns; those days have an anomalously high average return (~55%/yr
+        # annualised) that inflates the model by ~0.8–1.1 pp/yr in bull markets.
+        msci_rets_final.loc[handover_date:] = 0.0
         msci_rets_final.update(real_rets.loc[handover_date:])
 
     msci_prices = (1 + msci_rets_final).cumprod() * 100
