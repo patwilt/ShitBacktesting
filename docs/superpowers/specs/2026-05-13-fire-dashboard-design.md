@@ -80,6 +80,7 @@ Responsibilities:
 - `project_portfolio(principal, monthly_pmt, annual_growth_rate, years, annual_return) -> tuple[float, float]` — FV using annuity-due formula (reuse logic from `strategy_evaluator.py`)
 - `real_value(nominal, inflation_rate, years) -> float` — deflate to real dollars
 - `swr_income(portfolio, swr_rate, tax_engine_fn) -> float` — annual withdrawal after tax
+- `depletion_year(portfolio, annual_withdrawal, annual_return, inflation_rate, max_years=100) -> Optional[int]` — year portfolio hits zero given a fixed real withdrawal; returns None if it never depletes within max_years
 - `dca_crossover_year(projection_df, strategy) -> Optional[int]` — first year profit > DCA
 - `salary_crossover_year(projection_df, strategy) -> Optional[int]` — first year profit > salary
 
@@ -146,6 +147,7 @@ Empirical probability analysis of the rolling window CSV data:
 
 ### Page 5 — Retirement Drawdown
 - SWR sensitivity table (2.5%–5.5% in 0.25% steps): annual income, monthly income, portfolio required.
+- **Drawdown depletion slider**: annual withdrawal amount slider (e.g. $30k–$200k). Given starting portfolio, expected return, and inflation, computes and displays: year the portfolio reaches zero, a year-by-year balance chart showing the drawdown curve, and a "safe zone" indicator (green if portfolio survives 30+ years, amber 20–30, red <20 years). Updates live as slider moves.
 - Inflation erosion chart: real value of a fixed dollar withdrawal over 30 years at configurable inflation rates.
 - Super access bridge: preservation age (60 for post-1964 births), years between FIRE date and super access, bridge portfolio required.
 - Portfolio survival: using historical MDD data, shows in what fraction of periods a given drawdown would have depleted the portfolio within N years.
@@ -177,7 +179,7 @@ Test coverage targets:
 - `calculation_engine`: FIRE targets, projection math, edge cases (0 DCA, 0 return, negative inflation).
 - `tax_engine`: Each bracket boundary, Medicare threshold, both CGT law modes, transitional split-treatment.
 - `simulation_engine`: Empty series, single-window series, all-same-value degenerate case.
-- `portfolio_engine`: Annuity-due compounding against manual calculation, crossover detection.
+- `portfolio_engine`: Annuity-due compounding against manual calculation, crossover detection, depletion year (zero return case, positive return case, never-depletes case).
 - `csv_loader`: Missing directory, empty directory, multiple BT_* dirs (picks latest).
 
 ---
