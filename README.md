@@ -9,8 +9,7 @@
 ```
 data_downloader.py          →  data/market_data/
 rolling_backtest_suite.py   →  data/BT_*/rolling_msci_strategies_results.csv
-visual_backtest_report.ipynb     →  charts & summary stats
-strategy_evaluator.py       →  Streamlit FI projection app (optional)
+visual_backtest_report.ipynb     →  institutional-grade charts & summary stats
 ```
 
 ---
@@ -34,7 +33,9 @@ and saves CSVs to `data/market_data/`.
 
 > **Tip:** A VPN improves Yahoo Finance reliability.
 
-### 3. Run the backtest
+### 3. Configure & run the backtest
+
+All knobs are at the top of `rolling_backtest_suite.py` — no digging into functions required.
 
 ```bash
 python rolling_backtest_suite.py
@@ -43,49 +44,79 @@ python rolling_backtest_suite.py
 Output is written to a timestamped folder:
 
 ```
-data/BT_30y_1987-01-01_to_<today>_<timestamp>/rolling_msci_strategies_results.csv
+data/BT_<window>y_<start>_to_<end>_<timestamp>/rolling_msci_strategies_results.csv
 ```
 
-Key settings at the top of `rolling_backtest_suite.py`:
+#### Backtest window settings
 
 | Variable | Default | Description |
 |---|---|---|
-| `ROLLING_WINDOW_YEARS` | `30` | Length of each rolling window |
-| `START_DATE` | `1987-01-01` | Earliest window start date |
+| `ROLLING_WINDOW_YEARS` | `20` | Length of each rolling window |
+| `START_DATE` | `1960-01-01` | Earliest window start (suggest 1980+ for gold) |
+| `REBALANCE_DAYS` | `63` | Rebalance frequency in trading days (~quarterly) |
 | `DATA_FOLDER` | `data/market_data` | Input data location |
+
+#### Strategy weights
+
+Change the weights and the CSV column names update automatically — no manual rename required.
+
+```python
+# S1: Hybrid SPY
+S1_WEIGHTS = {"spy": 0.70, "upro": 0.15, "gold": 0.15}
+# → column name becomes "Hybrid SPY (70/15/15)"
+
+# S3: Hybrid MSCI
+S3_WEIGHTS = {"msci": 0.70, "upro": 0.15, "gold": 0.15}
+# → column name becomes "Hybrid MSCI (70/15/15)"
+```
+
+#### Asset model assumptions
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPY_DIVIDEND_YIELD` | `0.015` | Annual dividend yield added to S&P 500 price returns |
+| `UPRO_LEVERAGE` | `3.0` | Leverage multiplier for the UPRO proxy |
+| `UPRO_EXPENSE_RATIO` | `0.0091` | UPRO annual expense ratio (0.91%) |
+| `UPRO_FINANCING_SPREAD` | `0.003` | Overnight repo spread above Fed Funds Rate |
+| `MSCI_DIVIDEND_YIELD` | `0.02` | Annual dividend yield for MSCI World |
+| `MSCI_PRE1990_ALPHA` | `0.01` | +1%/yr Japan boom adjustment pre-1990 |
+| `MSCI_POST2010_ALPHA` | `-0.02` | −2%/yr US tech dominance drag post-2010 |
+| `GOLD_PRE1980_CAGR` | `0.12` | Synthetic gold return pre-1980 (USD decoupling era) |
+| `GOLD_1980_TO_REAL_CAGR` | `-0.025` | Synthetic gold return 1980 → real data start |
 
 ### 4. Visualise
 
-Open `rolling_Cagr_sp20.ipynb` in Jupyter and run all cells. The first cell
-lists all available backtest runs and prompts you to select one (defaults to
-the newest).
+Open `visual_backtest_report.ipynb` in Jupyter and run all cells. The first cell
+lists all available backtest runs newest-first and prompts you to select one
+(press Enter to accept the default — most recent).
 
-Charts produced:
-- Summary statistics table (median CAGR, median MDD)
-- KDE distributions of rolling CAGR and MDD
-- Rolling CAGR timeline across history
-- CDF of drawdown severity
+The notebook produces an institutional-grade interactive report:
 
-### 5. FI Projector (optional)
+| Section | Description |
+|---|---|
+| **Hero Metric Banner** | Median CAGR, P25–P75 expected range, Worst MDD, and Sharpe Proxy for every strategy |
+| **Rolling CAGR Timeline** | Plotly line chart; green/crimson shading marks above/below median regimes |
+| **Performance Distributions** | Violin + Box plots showing the full probability density of outcomes |
+| **Underwater Drawdown Chart** | Crimson fill area chart of Max Drawdown over time |
+| **Pain Period Summary** | Table of the 10 longest consecutive stretches in the worst-quartile drawdown regime |
+| **CDF of Max Drawdown** | Probability of experiencing a given loss; −20% and −40% risk zones marked |
+| **Monthly Alpha Map** | Plotly heatmap of median CAGR by year × calendar month |
 
-```bash
-streamlit run strategy_evaluator.py
-```
-
-Upload a backtest CSV (or let the app auto-detect the latest one), then
-configure salary, DCA amount, and investment horizon to find your personal
-Coast-FI and full-FI crossover years.
+All charts use Plotly (fully interactive — zoom, hover, toggle series).
 
 ---
 
 ## Strategies
 
+The two hybrid strategies and their benchmarks. S1/S3 weights are configurable
+in `rolling_backtest_suite.py` — see above.
+
 | | Description | Rebalance |
 |---|---|---|
-| **S1** | 70% S&P 500 / 15% 3× Leveraged / 15% Gold | Quarterly |
-| **S2** | 100% S&P 500 | — |
-| **S3** | 70% MSCI World / 15% 3× Leveraged / 15% Gold | Quarterly |
-| **S4** | 100% MSCI World | — |
+| **S1** | Hybrid SPY — configurable blend of S&P 500 / 3× Leveraged / Gold | Quarterly |
+| **S2** | 100% S&P 500 (benchmark) | — |
+| **S3** | Hybrid MSCI — same structure, MSCI World instead of S&P 500 | Quarterly |
+| **S4** | 100% MSCI World (benchmark) | — |
 
 ---
 
@@ -96,17 +127,17 @@ where needed.
 
 | Asset | Real data (Yahoo) | Synthetic fill |
 |---|---|---|
-| S&P 500 TR | `^GSPC` from ~1928 | 1.5% annual dividend yield added |
-| UPRO proxy | Derived from `^GSPC` | 3× daily return − period-appropriate financing cost |
-| Gold | `GC=F` from ~1974 | 1970–80: +12% CAGR; 1980–real start: −2.5% CAGR |
-| MSCI World | `IWDA.L` from 2009 | Synthetic from GSPC with era-adjusted alpha |
+| S&P 500 TR | `^GSPC` from ~1928 | `SPY_DIVIDEND_YIELD` added to price returns |
+| UPRO proxy | Derived from `^GSPC` | `UPRO_LEVERAGE`× daily return − period-appropriate financing cost |
+| Gold | `GC=F` from ~1974 | pre-1980: `GOLD_PRE1980_CAGR`; 1980→real: `GOLD_1980_TO_REAL_CAGR` |
+| MSCI World | `IWDA.L` from 2009 | Synthetic from GSPC with `MSCI_PRE1990_ALPHA` / `MSCI_POST2010_ALPHA` |
 
 **UPRO financing cost** uses historical Fed Funds Rates (FRED) rather than a
 flat rate, so the model correctly penalises the 2022–24 hiking cycle (~10.5%
 total annual cost) and rewards the 2009–15 ZIRP era (~1.5% total annual cost):
 
 ```
-annual_cost = (L-1) × (r_f + 0.30%) + 0.91% expense ratio
+annual_cost = (L-1) × (r_f + UPRO_FINANCING_SPREAD) + UPRO_EXPENSE_RATIO
 ```
 
 ---
@@ -122,9 +153,9 @@ These are intentional simplifications, not bugs.
    exposure intraday on volatile days, incurring small additional drag
    (~5–10 bps/year). This has a negligible effect on long rolling windows.
 
-3. **MSCI World pre-2009** is synthetic. The alpha adjustments (+1%/yr
-   pre-1990 for the Japan boom, −2%/yr post-2010 for US tech dominance) are
-   calibrated estimates, not real returns.
+3. **MSCI World pre-2009** is synthetic. The alpha adjustments are calibrated
+   estimates, not real returns. Adjust `MSCI_PRE1990_ALPHA` and
+   `MSCI_POST2010_ALPHA` if you have a different view.
 
 4. **No transaction costs or taxes** are modelled on rebalancing.
 
@@ -136,5 +167,4 @@ These are intentional simplifications, not bugs.
 python -m pytest tests/ -v
 ```
 
-36 tests covering the backtest engine, data helpers, and the Streamlit app's
-financial maths. All should pass in under a minute.
+Tests covering the backtest engine, data helpers, and financial maths.
