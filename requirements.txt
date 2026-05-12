@@ -2,3 +2,10 @@ streamlit
 pandas
 numpy
 plotly
+scipy
+joblib
+tqdm
+bt
+requests
+pytest
+hypothesis
