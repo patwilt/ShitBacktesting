@@ -57,7 +57,28 @@ _HECS_THRESHOLDS: list[tuple[float, float, float]] = [
     (159_663, float("inf"), 0.100),
 ]
 
+# ── Medicare levy constants ───────────────────────────────────────────────────
+# 2024-25 individual low-income threshold.  Below this → no levy.
+# Phase-in (shading) zone: levy = SHADE_RATE × (income − threshold)
+# Full rate kicks in at SHADE_OUT = threshold / (1 − FULL_RATE/SHADE_RATE) = $32,500
 _MEDICARE_LOW_INCOME_THRESHOLD = 26_000
+_MEDICARE_SHADE_RATE  = 0.10   # 10 cents per dollar in the phase-in zone
+_MEDICARE_FULL_RATE   = 0.02   # 2% once above the shade-out level
+_MEDICARE_SHADE_OUT   = _MEDICARE_LOW_INCOME_THRESHOLD / (
+    1.0 - _MEDICARE_FULL_RATE / _MEDICARE_SHADE_RATE
+)  # = 32_500
+
+# ── Medicare Levy Surcharge thresholds (2024-25, singles) ────────────────────
+# Applies to individuals without private hospital cover earning above $93,000.
+_MLS_TIERS: list[tuple[float, float, float]] = [
+    (0,        93_000,  0.000),
+    (93_000,  108_000,  0.010),
+    (108_000, 144_000,  0.0125),
+    (144_000, float("inf"), 0.015),
+]
+
+# ── Division 293 threshold ────────────────────────────────────────────────────
+_DIV_293_THRESHOLD = 250_000
 
 
 def income_tax(taxable_income: float) -> float:
@@ -71,10 +92,57 @@ def income_tax(taxable_income: float) -> float:
 
 
 def medicare_levy(taxable_income: float) -> float:
-    """Medicare levy: 2% of taxable income. Zero below low-income threshold."""
+    """
+    Medicare levy for 2024-25.
+
+    Phase-in (shading) zone: $26,000–$32,500 — levy = 10% of amount above threshold.
+    Full rate:                above $32,500   — levy = 2% of total taxable income.
+    Below $26,000: no levy.
+    """
     if taxable_income < _MEDICARE_LOW_INCOME_THRESHOLD:
         return 0.0
-    return taxable_income * 0.02
+    if taxable_income < _MEDICARE_SHADE_OUT:
+        return (taxable_income - _MEDICARE_LOW_INCOME_THRESHOLD) * _MEDICARE_SHADE_RATE
+    return taxable_income * _MEDICARE_FULL_RATE
+
+
+def medicare_levy_surcharge(
+    taxable_income: float,
+    has_private_hospital_cover: bool = False,
+) -> float:
+    """
+    Medicare Levy Surcharge (MLS) — 2024-25 singles rates.
+
+    Applies to individuals without private hospital cover earning above $93,000.
+    Rates applied to total taxable income (not marginal):
+      $93,001–$108,000 → 1.0%
+      $108,001–$144,000 → 1.25%
+      $144,001+         → 1.5%
+    """
+    if has_private_hospital_cover:
+        return 0.0
+    for lo, hi, rate in _MLS_TIERS:
+        if taxable_income <= hi:
+            return taxable_income * rate
+    return taxable_income * 0.015
+
+
+def division_293_tax(income: float, concessional_contributions: float) -> float:
+    """
+    Division 293 tax: additional 15% on concessional super contributions for
+    high earners where (income + contributions) > $250,000.
+
+    Tax is 15% on the lesser of:
+      - Total concessional contributions
+      - The amount by which (income + contributions) exceeds $250,000
+    """
+    if concessional_contributions <= 0:
+        return 0.0
+    combined = income + concessional_contributions
+    if combined <= _DIV_293_THRESHOLD:
+        return 0.0
+    taxable_portion = min(concessional_contributions, combined - _DIV_293_THRESHOLD)
+    return taxable_portion * 0.15
 
 
 def hecs_repayment(income: float, hecs_balance: float) -> float:
@@ -170,44 +238,6 @@ def marginal_rate(income: float) -> float:
     return 0.0
 
 
-def effective_tax_rate(
-    gross_income: float,
-    super_contributions: float,
-    hecs_balance: float,
-    cgt_gain: float,
-    held_years: float,
-    law: CGTLaw,
-    acquisition_date: Optional[date] = None,
-    cpi_at_acquisition: Optional[float] = None,
-    cpi_current: Optional[float] = None,
-) -> dict:
-    """Returns a breakdown dict of all tax components plus effective rate."""
-    it = income_tax(gross_income)
-    ml = medicare_levy(gross_income)
-    hecs = hecs_repayment(gross_income, hecs_balance)
-    st = super_concessional_tax(super_contributions)
-    marginal = marginal_rate(gross_income)
-    cgt = cgt_liability(cgt_gain, held_years, marginal, law,
-                        acquisition_date=acquisition_date,
-                        cpi_at_acquisition=cpi_at_acquisition,
-                        cpi_current=cpi_current)
-
-    total = it + ml + hecs + st + cgt
-    base = gross_income + cgt_gain
-    eff_rate = total / base if base > 0 else 0.0
-
-    return {
-        "income_tax": it,
-        "medicare_levy": ml,
-        "hecs_repayment": hecs,
-        "super_tax": st,
-        "cgt": cgt,
-        "total_tax": total,
-        "effective_rate": eff_rate,
-        "net_income": gross_income - it - ml - hecs,
-    }
-
-
 # ── Low Income Tax Offset (LITO) 2024-25 ──────────────────────────────────────
 def lito(taxable_income: float) -> float:
     """
@@ -232,22 +262,129 @@ def net_income_tax(taxable_income: float) -> float:
     return max(income_tax(taxable_income) - lito(taxable_income), 0.0)
 
 
+def _taxable_cgt_for_stacking(
+    gain: float,
+    held_years: float,
+    law: CGTLaw,
+    cpi_at_acquisition: Optional[float] = None,
+    cpi_current: Optional[float] = None,
+    is_main_residence: bool = False,
+) -> float:
+    """
+    Returns the portion of the capital gain that is included in taxable income
+    for income-stacking purposes (determines marginal rate and Medicare levy base).
+    """
+    if gain <= 0 or is_main_residence:
+        return 0.0
+    if law == CGTLaw.CURRENT:
+        discount = 0.5 if held_years >= 1.0 else 0.0
+        return gain * (1.0 - discount)
+    # Proposed 2027: real gain flows through as taxable income
+    if cpi_at_acquisition and cpi_current and cpi_at_acquisition > 0:
+        return max(gain / (cpi_current / cpi_at_acquisition), 0.0)
+    return gain
+
+
+def effective_tax_rate(
+    gross_income: float,
+    super_contributions: float,
+    hecs_balance: float,
+    cgt_gain: float,
+    held_years: float,
+    law: CGTLaw,
+    acquisition_date: Optional[date] = None,
+    cpi_at_acquisition: Optional[float] = None,
+    cpi_current: Optional[float] = None,
+    is_main_residence: bool = False,
+    is_new_build: bool = False,
+    has_private_hospital_cover: bool = False,
+) -> dict:
+    """
+    Returns a breakdown dict of all tax components plus effective rate.
+
+    Fixes applied vs prior version:
+    - LITO is applied via net_income_tax (not raw income_tax)
+    - CGT gain is stacked onto taxable income to determine the correct marginal
+      rate for CGT liability, Medicare levy, and HECS repayment
+    - is_main_residence and is_new_build are passed through to cgt_liability
+    - Medicare Levy Surcharge (MLS) is included
+    - Division 293 tax is included
+    """
+    # Taxable CGT portion for income stacking (determines marginal rate, Medicare base)
+    stacking_amount = _taxable_cgt_for_stacking(
+        cgt_gain, held_years, law,
+        cpi_at_acquisition=cpi_at_acquisition,
+        cpi_current=cpi_current,
+        is_main_residence=is_main_residence,
+    )
+    combined_income = gross_income + stacking_amount
+
+    it     = net_income_tax(gross_income)          # income tax on ordinary income (LITO applied)
+    ml     = medicare_levy(combined_income)         # Medicare levy on full taxable income
+    mls    = medicare_levy_surcharge(combined_income, has_private_hospital_cover)
+    hecs   = hecs_repayment(combined_income, hecs_balance)
+    s_tax  = super_concessional_tax(super_contributions)
+    d293   = division_293_tax(gross_income, super_contributions)
+
+    # CGT uses marginal rate at the combined (stacked) income level
+    stacked_mar = marginal_rate(combined_income)
+    cgt = cgt_liability(
+        cgt_gain, held_years, stacked_mar, law,
+        acquisition_date=acquisition_date,
+        cpi_at_acquisition=cpi_at_acquisition,
+        cpi_current=cpi_current,
+        is_main_residence=is_main_residence,
+        is_new_build=is_new_build,
+    )
+
+    total = it + ml + mls + hecs + s_tax + d293 + cgt
+    base  = gross_income + cgt_gain
+    eff_rate = total / base if base > 0 else 0.0
+
+    return {
+        "income_tax":               it,
+        "medicare_levy":            ml,
+        "medicare_levy_surcharge":  mls,
+        "hecs_repayment":           hecs,
+        "super_tax":                s_tax,
+        "division_293_tax":         d293,
+        "cgt":                      cgt,
+        "total_tax":                total,
+        "effective_rate":           eff_rate,
+        "net_income":               gross_income - it - ml - mls - hecs,
+    }
+
+
 def gross_withdrawal_for_net_spend(
     net_spend: float,
     hecs_balance: float = 0.0,
+    existing_income: float = 0.0,
     max_iter: int = 60,
 ) -> float:
     """
     Binary search: find the gross portfolio withdrawal that yields exactly
     net_spend after income tax (net of LITO), Medicare levy, and HECS repayment.
+
+    existing_income: other income already received (e.g. part-time salary in
+    Barista FIRE). The withdrawal is taxed at the marginal rate on top of this
+    income, so this correctly captures the income-stacking effect.
+
     Assumes all drawdown is treated as ordinary income (conservative).
+    MLS is NOT included — callers should add MLS separately where applicable.
     """
     if net_spend <= 0:
         return 0.0
     lo, hi = net_spend, net_spend * 2.5
+
+    def _tax_on_withdrawal(w: float) -> float:
+        combined = existing_income + w
+        t_combined = net_income_tax(combined) + medicare_levy(combined) + hecs_repayment(combined, hecs_balance)
+        t_existing = net_income_tax(existing_income) + medicare_levy(existing_income) + hecs_repayment(existing_income, hecs_balance)
+        return t_combined - t_existing
+
     for _ in range(max_iter):
         mid = (lo + hi) / 2.0
-        take_home = mid - net_income_tax(mid) - medicare_levy(mid) - hecs_repayment(mid, hecs_balance)
+        take_home = mid - _tax_on_withdrawal(mid)
         if abs(take_home - net_spend) < 0.50:
             return mid
         if take_home < net_spend:

@@ -137,7 +137,7 @@ The chart shows balances in today's dollars — the real return (nominal minus i
 | 20–30 years | ⚠️ Moderate risk — consider reducing spending |
 | < 20 years | 🚨 High risk — portfolio likely insufficient |
 
-> Values shown in nominal (not inflation-adjusted) AUD. Your real spending power declines over time due to inflation.
+> Values shown in **real** (inflation-adjusted, today's) AUD. Your annual withdrawal maintains constant purchasing power — in nominal terms you would draw more each year due to inflation.
 """)
 
 st.divider()

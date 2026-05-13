@@ -46,11 +46,12 @@ if result is None:
 data, csv_path = result
 st.caption(f"Using: `{csv_path}`")
 
-years_to_retire = target_retire_age - current_age
-fire_num        = fire_target(target_spending, swr)
-_real_r         = (1 + annual_return / 100) / (1 + inflation_rate / 100) - 1
-coast_num       = coast_fire_target(fire_num, years_to_retire, _real_r)
+years_to_retire  = target_retire_age - current_age
+fire_num         = fire_target(target_spending, swr)
 fire_num_tax_adj = gross_withdrawal_for_net_spend(target_spending) / swr
+_real_r          = (1 + annual_return / 100) / (1 + inflation_rate / 100) - 1
+# Coast FIRE discounts the tax-adjusted target — the true portfolio needed at retirement
+coast_num        = coast_fire_target(fire_num_tax_adj, years_to_retire, _real_r)
 
 strategy_cols = data.strategies
 proj_df = run_yearly_projection(
@@ -71,7 +72,7 @@ proj_df = run_yearly_projection(
 
 first_strat = strategy_cols[0]
 projected_at_retire = proj_df[f"{first_strat}_Total"].iloc[-1] if not proj_df.empty else 0
-fire_age_val = fire_age(current_age, proj_df, fire_num, first_strat)
+fire_age_val = fire_age(current_age, proj_df, fire_num_tax_adj, first_strat)
 years_to_fire = (fire_age_val - current_age) if fire_age_val else None
 
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -109,8 +110,8 @@ for i, strat in enumerate(strategy_cols):
         hovertemplate=f"{strat}<br>Age %{{x}}<br>${{y:,.0f}}<extra></extra>",
     ))
 
-fig.add_hline(y=fire_num, line_dash="dash", line_color=COLORS["yellow"],
-              annotation_text=f"FIRE ${fire_num/1e6:.2f}M",
+fig.add_hline(y=fire_num_tax_adj, line_dash="dash", line_color=COLORS["yellow"],
+              annotation_text=f"FIRE (Tax-Adj.) ${fire_num_tax_adj/1e6:.2f}M",
               annotation_font_color=COLORS["yellow"],
               annotation_position="bottom right")
 

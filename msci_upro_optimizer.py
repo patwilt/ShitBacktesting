@@ -41,8 +41,8 @@ from rolling_backtest_suite import calculate_metrics, load_market_data
 # CONFIGURATION
 # ==========================================
 
-START_DATE           = "1980-01-01"
-ROLLING_WINDOW_YEARS = 25
+START_DATE           = "1900-01-01"
+ROLLING_WINDOW_YEARS = 20
 WINDOW_DAYS          = ROLLING_WINDOW_YEARS * 252   # ≈ 5,040 trading days
 ALLOC_STEP           = 0.05           # 5% grid steps
 MDD_CONSTRAINT       = -0.70          # Must not exceed −70% drawdown
@@ -52,7 +52,7 @@ WINDOW_STEP_DAYS     = 1              # Roll 20-year window every 5 trading days
 # List assets whose allocations will be swept across the grid.
 #   ["msci", "upro"]         → Gold fixed at GOLD_FIXED  (19 allocations, fast)
 #   ["msci", "upro", "gold"] → Full 3-asset grid          (231 allocations at 5%)
-SWEEP_ASSETS = ["msci", "upro", "gold"]
+SWEEP_ASSETS = ["msci", "upro"]
 
 # Fixed gold weight — only applied when "gold" is NOT in SWEEP_ASSETS.
 GOLD_FIXED   = 0.10

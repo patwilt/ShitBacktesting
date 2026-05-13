@@ -86,7 +86,10 @@ bridge_cols = st.columns(4)
 lean_gross    = gross_withdrawal_for_net_spend(lean_spending)
 median_gross  = gross_withdrawal_for_net_spend(median_spending)
 fat_gross     = gross_withdrawal_for_net_spend(fat_spending)
-barista_gross = gross_withdrawal_for_net_spend(max(barista_spending - barista_income, 0))
+# Barista FIRE: portfolio withdrawal is taxed on top of existing part-time income
+# (income-stacking effect — the part-time income consumes low-bracket space first)
+barista_net_draw = max(barista_spending - barista_income, 0)
+barista_gross = gross_withdrawal_for_net_spend(barista_net_draw, existing_income=barista_income)
 
 lean_num_adj    = lean_gross    / swr
 median_num_adj  = median_gross  / swr
@@ -239,9 +242,10 @@ _super_bal     = float(super_balance)
 _current_sal   = float(salary)
 _annual_contribs_total = 0.0
 
+_r_acc = _r * (1.0 - 0.15)  # effective nominal return after 15% super earnings tax
 for _ in range(years_to_pres):
     net_contrib       = _current_sal * _sgc * (1.0 - 0.15)   # 15% contributions tax
-    _super_bal        = _super_bal * (1.0 + _r) + net_contrib
+    _super_bal        = _super_bal * (1.0 + _r_acc) + net_contrib
     _annual_contribs_total += net_contrib
     _current_sal     *= (1.0 + _sg)
 
@@ -255,8 +259,9 @@ sc2.metric(
     help=(
         f"Starting balance: ${super_balance:,}  ·  "
         f"Avg annual contribution (net of 15% tax, real): ~${avg_annual_contrib:,.0f}  ·  "
-        f"Return: {super_return}%/yr nominal  ·  Inflation: {inflation_rate}%/yr  ·  "
-        f"Real return: {(_r - inflation_rate/100)*100:.1f}%/yr  ·  "
+        f"Nominal return: {super_return}%/yr  →  after 15% earnings tax: {_r_acc*100:.2f}%/yr  ·  "
+        f"Inflation: {inflation_rate}%/yr  ·  "
+        f"Real return (after earnings tax): {((1+_r_acc)/(1+inflation_rate/100)-1)*100:.2f}%/yr  ·  "
         f"Value in today's (real) AUD over {years_to_pres} years"
     ),
 )
@@ -294,9 +299,10 @@ non_super_at_fire = float(proj_df[_strat_col].iloc[min(years_to_fire, len(proj_d
 # Super balance at FIRE age (accumulate with SGC contributions up to FIRE age in nominal,
 # then deflate to real/today's AUD so it's comparable with non_super_at_fire from proj_df)
 _r2, _sg2, _sgc2 = super_return / 100.0, salary_growth / 100.0, sgc_rate / 100.0
+_r2_acc = _r2 * (1.0 - 0.15)  # after 15% super earnings tax (accumulation phase)
 _sb2, _sal2 = float(super_balance), float(salary)
 for _ in range(years_to_fire):
-    _sb2  = _sb2 * (1.0 + _r2) + _sal2 * _sgc2 * 0.85
+    _sb2  = _sb2 * (1.0 + _r2_acc) + _sal2 * _sgc2 * 0.85
     _sal2 *= (1.0 + _sg2)
 # Deflate nominal accumulation → real (today's purchasing power)
 super_at_fire = _sb2 / (1.0 + inflation_rate / 100.0) ** years_to_fire if years_to_fire > 0 else _sb2
@@ -315,8 +321,9 @@ with ctrl2:
 inf_r = inflation_rate / 100.0
 # Real returns: (1 + nominal) / (1 + inflation) - 1
 # All bucket simulations use real returns so balances stay in today's AUD.
-real_port_r = (1.0 + port_return) / (1.0 + inf_r) - 1.0
-real_sup_r  = (1.0 + _r2) / (1.0 + inf_r) - 1.0
+real_port_r    = (1.0 + port_return) / (1.0 + inf_r) - 1.0
+real_sup_r     = (1.0 + _r2) / (1.0 + inf_r) - 1.0       # pension phase: 0% earnings tax
+real_sup_r_acc = (1.0 + _r2_acc) / (1.0 + inf_r) - 1.0   # accumulation phase: 15% earnings tax
 sim_ages = list(range(fire_age_target, sim_end_age + 1))
 
 # ── Helper: simulate two-bucket drawdown with a fixed initial withdrawal ──────
@@ -337,10 +344,11 @@ def _sim_buckets(
         ns_out.append(max(ns, 0.0))
         sup_out.append(max(sup, 0.0))
         if age < pres_age:
+            # Accumulation phase: super still subject to 15% earnings tax
             ns  = max(ns, 0.0) * (1.0 + real_port_r) - w_b
-            sup = max(sup, 0.0) * (1.0 + real_sup_r)
-            # No w_b inflation — withdrawal is constant in real terms
+            sup = max(sup, 0.0) * (1.0 + real_sup_r_acc)
         else:
+            # Pension phase: super earnings are tax-free
             draw = w_p
             sup_growth = max(sup, 0.0) * (1.0 + real_sup_r)
             if sup_growth >= draw:
@@ -350,7 +358,6 @@ def _sim_buckets(
                 leftover = draw - sup_growth
                 sup = 0.0
                 ns  = max(ns, 0.0) * (1.0 + real_port_r) - leftover
-            # No w_p inflation
     return ns_out, sup_out
 
 # ── Strategy A: SWR — draw SWR% of super post-preservation; non-super compounds
@@ -371,7 +378,8 @@ swr_post_w = (
 _ns_p, _sup_p = non_super_at_fire, super_at_fire
 for _age in range(fire_age_target, pres_age):
     _ns_p  = max(_ns_p, 0.0) * (1.0 + real_port_r) - float(bridge_withdrawal)
-    _sup_p = max(_sup_p, 0.0) * (1.0 + real_sup_r)
+    # Bridge period: super still in accumulation phase → 15% earnings tax applies
+    _sup_p = max(_sup_p, 0.0) * (1.0 + real_sup_r_acc)
 super_at_pres_unlocked = max(_sup_p, 0.0)
 swr_post_w = super_at_pres_unlocked * swr
 
@@ -387,9 +395,11 @@ def _end_total(w0: float) -> float:
     ns, sup, w = non_super_at_fire, super_at_fire, w0
     for age in range(fire_age_target, sim_end_age):
         if age < pres_age:
+            # Accumulation phase: 15% earnings tax on super growth
             ns  = ns * (1.0 + real_port_r) - w
-            sup = sup * (1.0 + real_sup_r)
+            sup = sup * (1.0 + real_sup_r_acc)
         else:
+            # Pension phase: tax-free super earnings
             sup_after = sup * (1.0 + real_sup_r) - w
             if sup_after >= 0:
                 sup = sup_after
@@ -397,7 +407,6 @@ def _end_total(w0: float) -> float:
             else:
                 ns  = ns * (1.0 + real_port_r) + sup_after
                 sup = 0.0
-        # w stays constant — it's in real terms
     return ns + sup
 
 # Bracket: lo leaves money on table; hi bankrupts before sim_end_age
@@ -447,7 +456,7 @@ if fire_age_C_start < fire_age_target:
     # Super: accumulated with SGC only up to fire_age_C_start, then deflated to real
     _sb_C, _sal_C = float(super_balance), float(salary)
     for _ in range(years_to_fire_C):
-        _sb_C = _sb_C * (1.0 + _r2) + _sal_C * _sgc2 * 0.85
+        _sb_C = _sb_C * (1.0 + _r2_acc) + _sal_C * _sgc2 * 0.85
         _sal_C *= (1.0 + _sg2)
     super_at_fire_C = _sb_C / (1.0 + inflation_rate / 100.0) ** years_to_fire_C if years_to_fire_C > 0 else _sb_C
     sim_ages_C = list(range(fire_age_C_start, sim_end_age + 1))
@@ -476,7 +485,8 @@ else:
     strat_C_bridge_w = swr_post_w
 
 # Super at pres_age for C: grows WITHOUT contributions after fire_age_C_start
-super_at_pres_C = super_at_fire_C * (1.0 + real_sup_r) ** bridge_years_C
+# Bridge is still accumulation phase (pre-preservation) → 15% earnings tax
+super_at_pres_C = super_at_fire_C * (1.0 + real_sup_r_acc) ** bridge_years_C
 
 # Post-pres for C: deplete super_at_pres_C to $0 by sim_end_age
 _post_yrs_C = max(sim_end_age - pres_age, 1)
@@ -504,9 +514,11 @@ def _sim_C(ns0: float, sup0: float, w_bridge: float, w_post: float) -> tuple[lis
         ns_out.append(max(ns, 0.0))
         sup_out.append(max(sup, 0.0))
         if age < pres_age:
+            # Accumulation phase: 15% earnings tax
             ns  = max(ns, 0.0) * (1.0 + real_port_r) - w_bridge
-            sup = max(sup, 0.0) * (1.0 + real_sup_r)
+            sup = max(sup, 0.0) * (1.0 + real_sup_r_acc)
         else:
+            # Pension phase: tax-free earnings
             sup_growth = max(sup, 0.0) * (1.0 + real_sup_r)
             if sup_growth >= w_post:
                 sup = sup_growth - w_post
