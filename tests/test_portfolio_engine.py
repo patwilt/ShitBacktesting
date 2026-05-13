@@ -36,7 +36,10 @@ def test_depletion_year_never_depletes_returns_none():
 def test_depletion_year_inflation_accelerates_depletion():
     no_inf = depletion_year(500_000, 20_000, annual_return=0.04, inflation_rate=0.0)
     with_inf = depletion_year(500_000, 20_000, annual_return=0.04, inflation_rate=0.03)
-    assert with_inf < no_inf
+    # $20k withdrawal at 4% return is exactly break-even, so no_inf may be None.
+    # Inflation causes the real withdrawal to grow, eventually depleting the portfolio.
+    assert with_inf is not None
+    assert no_inf is None or with_inf < no_inf
 
 
 def test_depletion_year_immediate_depletion():
