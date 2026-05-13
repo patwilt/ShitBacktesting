@@ -434,7 +434,26 @@ if bridge_years > 0:
 else:
     strat_C_bridge_w = swr_post_w
 
-ns_C, sup_C = _sim_buckets(non_super_at_fire, super_at_fire, strat_C_bridge_w, swr_post_w)
+# Strategy C post-pres: deplete super to $0 by sim_end_age (same end-goal as Strat B
+# but starting from the super balance that survived the aggressive non-super bridge).
+_post_yrs_C = max(sim_end_age - pres_age, 1)
+
+def _sup_end_C(w_post: float) -> float:
+    sup = super_at_pres_unlocked
+    for _ in range(_post_yrs_C):
+        sup = max(sup, 0.0) * (1.0 + real_sup_r) - w_post
+    return sup
+
+_lo_cp, _hi_cp = 0.0, max(super_at_pres_unlocked * 0.5, 1.0)
+for _ in range(80):
+    _mid_cp = (_lo_cp + _hi_cp) / 2.0
+    if _sup_end_C(_mid_cp) > 0:
+        _lo_cp = _mid_cp
+    else:
+        _hi_cp = _mid_cp
+strat_C_post_w = (_lo_cp + _hi_cp) / 2.0
+
+ns_C, sup_C = _sim_buckets(non_super_at_fire, super_at_fire, strat_C_bridge_w, strat_C_post_w)
 total_C = [ns + s for ns, s in zip(ns_C, sup_C)]
 
 # ── Strategy C FIRE age ───────────────────────────────────────────────────────
@@ -507,8 +526,12 @@ mc2.metric(
 )
 mc3.metric(
     "📦 Strat C — Post-Super Income",
-    f"${swr_post_w:,.0f}/yr",
-    help=f"After non-super is spent, ${super_at_pres_unlocked:,.0f} of super funds ${swr_post_w:,.0f}/yr at {swr*100:.1f}% SWR.",
+    f"${strat_C_post_w:,.0f}/yr",
+    help=(
+        f"After non-super is spent by age {pres_age}, super of ${super_at_pres_unlocked:,.0f} "
+        f"is drawn at ${strat_C_post_w:,.0f}/yr (real) — depleting it to $0 by age {sim_end_age}. "
+        f"Compare: Strat A's sustainable SWR is ${swr_post_w:,.0f}/yr."
+    ),
 )
 
 # ── Chart ─────────────────────────────────────────────────────────────────────
