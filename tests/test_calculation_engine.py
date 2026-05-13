@@ -68,3 +68,22 @@ def test_fire_age_not_found_returns_none():
     })
     result = fire_age(current_age=30, projection_df=df, target_portfolio=1_000_000, strategy="strat")
     assert result is None
+
+
+def test_preservation_age_born_1964_or_later():
+    from engines.calculation_engine import preservation_age
+    assert preservation_age(1990) == 60
+    assert preservation_age(1964) == 60
+
+
+def test_preservation_age_born_before_1960():
+    from engines.calculation_engine import preservation_age
+    assert preservation_age(1955) == 55
+
+
+def test_preservation_age_transitional():
+    from engines.calculation_engine import preservation_age
+    assert preservation_age(1960) == 56
+    assert preservation_age(1961) == 57
+    assert preservation_age(1962) == 58
+    assert preservation_age(1963) == 59

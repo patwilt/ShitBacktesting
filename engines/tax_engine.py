@@ -206,3 +206,52 @@ def effective_tax_rate(
         "effective_rate": eff_rate,
         "net_income": gross_income - it - ml - hecs,
     }
+
+
+# ── Low Income Tax Offset (LITO) 2024-25 ──────────────────────────────────────
+def lito(taxable_income: float) -> float:
+    """
+    Low Income Tax Offset — reduces net tax payable.
+    2024-25 schedule:
+      $0 – $37,500:     $700 flat
+      $37,500 – $45,000: reduces by 5c per $1 over $37,500
+      $45,000 – $66,667: reduces by 1.5c per $1 over $45,000
+      > $66,667:         $0
+    """
+    if taxable_income <= 37_500:
+        return 700.0
+    if taxable_income <= 45_000:
+        return max(700.0 - (taxable_income - 37_500) * 0.05, 0.0)
+    if taxable_income <= 66_667:
+        return max(325.0 - (taxable_income - 45_000) * 0.015, 0.0)
+    return 0.0
+
+
+def net_income_tax(taxable_income: float) -> float:
+    """Income tax after applying LITO. Never negative."""
+    return max(income_tax(taxable_income) - lito(taxable_income), 0.0)
+
+
+def gross_withdrawal_for_net_spend(
+    net_spend: float,
+    hecs_balance: float = 0.0,
+    max_iter: int = 60,
+) -> float:
+    """
+    Binary search: find the gross portfolio withdrawal that yields exactly
+    net_spend after income tax (net of LITO), Medicare levy, and HECS repayment.
+    Assumes all drawdown is treated as ordinary income (conservative).
+    """
+    if net_spend <= 0:
+        return 0.0
+    lo, hi = net_spend, net_spend * 2.5
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2.0
+        take_home = mid - net_income_tax(mid) - medicare_levy(mid) - hecs_repayment(mid, hecs_balance)
+        if abs(take_home - net_spend) < 0.50:
+            return mid
+        if take_home < net_spend:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0

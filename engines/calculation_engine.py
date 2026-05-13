@@ -60,3 +60,23 @@ def fire_age(
     if matches.empty:
         return None
     return current_age + int(matches.iloc[0])
+
+
+def preservation_age(birth_year: int) -> int:
+    """
+    Australian superannuation preservation age by birth year.
+    From 1 July 1964 onwards the preservation age is 60.
+    Earlier birth years have lower preservation ages (55–59).
+    Source: ATO — Super preservation age.
+    """
+    if birth_year < 1960:
+        return 55
+    if birth_year < 1961:
+        return 56
+    if birth_year < 1962:
+        return 57
+    if birth_year < 1963:
+        return 58
+    if birth_year < 1964:
+        return 59
+    return 60

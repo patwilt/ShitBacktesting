@@ -5,8 +5,9 @@ import plotly.graph_objects as go
 
 from utils.colors import COLORS, STRATEGY_COLORS
 from utils.csv_loader import load_latest_backtest_csv
-from engines.portfolio_engine import run_yearly_projection, real_value
-from engines.calculation_engine import fire_target, fire_age, coast_fire_target
+from engines.portfolio_engine import run_yearly_projection
+from engines.calculation_engine import fire_target, fire_age, coast_fire_target, preservation_age
+from engines.tax_engine import gross_withdrawal_for_net_spend
 
 st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
 st.title("📊 Dashboard")
@@ -21,6 +22,8 @@ with st.sidebar:
     current_portfolio = st.number_input("Current Portfolio (AUD)", min_value=0, value=50_000, step=5_000)
     monthly_dca       = st.number_input("Monthly DCA (AUD)",       min_value=0, value=1_500,  step=100)
     salary            = st.number_input("Annual Salary (AUD)",     min_value=0, value=100_000, step=5_000)
+    birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2005, value=1990, step=1)
+    super_balance = st.number_input("Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
     st.divider()
     st.header("📉 Assumptions")
     inflation_rate  = st.slider("Inflation Rate (%)",  0.0, 10.0, 2.5, 0.1, help="Annual CPI assumption")
@@ -39,6 +42,8 @@ st.caption(f"Using: `{csv_path}`")
 years_to_retire = target_retire_age - current_age
 fire_num        = fire_target(target_spending, swr)
 coast_num       = coast_fire_target(fire_num, years_to_retire, annual_return / 100.0)
+fire_num_tax_adj = gross_withdrawal_for_net_spend(target_spending) / swr
+pres_age         = preservation_age(birth_year)
 
 strategy_cols = data.strategies
 proj_df = run_yearly_projection(
@@ -62,10 +67,10 @@ projected_at_retire = proj_df[f"{first_strat}_Total"].iloc[-1] if not proj_df.em
 fire_age_val = fire_age(current_age, proj_df, fire_num, first_strat)
 years_to_fire = (fire_age_val - current_age) if fire_age_val else None
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
-    st.metric("🎯 FIRE Number", f"${fire_num:,.0f}",
-              help=f"Required portfolio at {swr*100:.1f}% SWR for ${target_spending:,}/yr spending")
+    st.metric("🎯 FIRE Number (Tax-Adj.)", f"${fire_num_tax_adj:,.0f}",
+              help=f"Gross withdrawal ÷ SWR to yield ${target_spending:,}/yr after-tax. Accounts for income tax and Medicare levy.")
 with col2:
     st.metric("🌊 Coast FIRE Number", f"${coast_num:,.0f}",
               help=f"Amount needed today to coast to FIRE by age {target_retire_age}")
@@ -77,6 +82,11 @@ with col3:
 with col4:
     st.metric(f"📈 Portfolio at Age {target_retire_age}", f"${projected_at_retire:,.0f}",
               delta=f"{'Above' if projected_at_retire >= fire_num else 'Below'} FIRE number")
+with col5:
+    years_to_pres = max(pres_age - current_age, 0)
+    st.metric("🏦 Super Access Age", str(pres_age),
+              delta=f"{years_to_pres} yrs away" if years_to_pres > 0 else "Accessible now",
+              help="Age you can access your superannuation. Based on birth year under ATO preservation rules.")
 
 st.divider()
 st.subheader("Net Worth Timeline")

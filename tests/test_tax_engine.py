@@ -10,6 +10,9 @@ from engines.tax_engine import (
     super_concessional_tax,
     cgt_liability,
     effective_tax_rate,
+    lito,
+    net_income_tax,
+    gross_withdrawal_for_net_spend,
 )
 
 
@@ -139,3 +142,47 @@ def test_effective_tax_rate_zero_income():
                                 cgt_gain=0, held_years=0, law=CGTLaw.CURRENT)
     assert result["total_tax"] == pytest.approx(0.0)
     assert result["effective_rate"] == pytest.approx(0.0)
+
+
+# --- lito ---
+
+def test_lito_low_income_full_offset():
+    assert lito(30_000) == pytest.approx(700.0)
+
+
+def test_lito_phase_out_first_band():
+    # $40,000: $700 - (40,000 - 37,500) * 0.05 = $700 - $125 = $575
+    assert lito(40_000) == pytest.approx(575.0, abs=1.0)
+
+
+def test_lito_phase_out_second_band():
+    # $55,000: $325 - (55,000 - 45,000) * 0.015 = $325 - $150 = $175
+    assert lito(55_000) == pytest.approx(175.0, abs=1.0)
+
+
+def test_lito_zero_above_threshold():
+    assert lito(70_000) == pytest.approx(0.0)
+
+
+def test_net_income_tax_zero_at_low_income():
+    # Below tax threshold, income_tax is 0, LITO is 700 → clamped to 0
+    assert net_income_tax(15_000) == pytest.approx(0.0)
+
+
+def test_net_income_tax_lower_than_gross_tax():
+    # At $50k, income tax is $6,288 but LITO reduces it
+    assert net_income_tax(50_000) < income_tax(50_000)
+
+
+def test_gross_withdrawal_roundtrip():
+    # If target net is $60k, solve for gross and verify net is $60k
+    from engines.tax_engine import gross_withdrawal_for_net_spend, net_income_tax, medicare_levy, hecs_repayment
+    target = 60_000.0
+    gross = gross_withdrawal_for_net_spend(target)
+    actual_net = gross - net_income_tax(gross) - medicare_levy(gross) - hecs_repayment(gross, 0)
+    assert abs(actual_net - target) < 1.0
+
+
+def test_gross_withdrawal_always_gte_net():
+    gross = gross_withdrawal_for_net_spend(80_000)
+    assert gross >= 80_000
