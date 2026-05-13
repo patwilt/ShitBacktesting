@@ -1,28 +1,35 @@
-# Data
+# ── Data ──────────────────────────────────────────────────────────────────────
+# Ignore all CSVs and raw data by default (large files)
 *.csv
 
-# Images
+# Ignore generated backtest result folders and raw market data
+data/BT_*/
+data/market_data/
+
+# Allow the bundled sample dataset so the app runs on a fresh clone
+# (git needs the directory un-ignored first, then the specific file)
+!data/sample/
+!data/sample/rolling_msci_strategies_results.csv
+
+# ── Images ────────────────────────────────────────────────────────────────────
 *.png
 *.jpg
 *.jpeg
 
-# Jupyter checkpoints
+# ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 
-# Python cache
+# ── Python cache ──────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# VSCode
+# ── Editors ───────────────────────────────────────────────────────────────────
 .vscode/
-
-# Mac
 .DS_Store
 
-# Generated backtest folders
+# ── Legacy generated folders (kept for safety) ────────────────────────────────
 BT_*/
 CAGR_Plots/
 CAGR Testing/
 NewPlots/
-data/
