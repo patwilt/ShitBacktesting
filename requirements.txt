@@ -1,23 +1,6 @@
-# ── Core data & computation ───────────────────────────────────────────────────
-pandas>=3.0.2
-numpy>=2.4.3
-joblib>=1.5.3
-tqdm>=4.67.3
-
-# ── Data download ─────────────────────────────────────────────────────────────
-bt>=1.1.4                  # data_downloader.py — bt.get() wraps Yahoo Finance
-
-# ── Visualisation (visual_backtest_report.ipynb) ──────────────────────────────
-plotly>=6.6.0
-nbformat>=4.2.0            # required for Plotly inline rendering in Jupyter
-
-# ── Legacy notebooks (rolling_Cagr_sp20.ipynb, cagr_testing.ipynb) ───────────
-matplotlib>=3.10.8
-seaborn>=0.13.2
-
-# ── FI Projector app (strategy_evaluator.py) ─────────────────────────────────
-streamlit>=1.56.0
-
-# ── Tests ─────────────────────────────────────────────────────────────────────
-pytest>=9.0.3
-hypothesis>=6.152.6
+# ── FIRE Dashboard (Streamlit Cloud) ─────────────────────────────────────────
+# Only the packages actually used by the web app.
+streamlit>=1.41.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0

@@ -1,0 +1,17 @@
+# ── Development & backtesting (local only, NOT used by Streamlit Cloud) ──────
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+# Backtesting suite (rolling_backtest_suite.py)
+joblib>=1.5.3
+tqdm>=4.67.3
+bt>=1.1.4                  # bt.get() wraps Yahoo Finance
+
+# Notebooks
+matplotlib>=3.10.8
+seaborn>=0.13.2
+nbformat>=4.2.0
+
+# Tests
+pytest>=9.0.3
+hypothesis>=6.152.6
