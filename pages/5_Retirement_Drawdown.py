@@ -39,7 +39,7 @@ data, _ = result
 dep_year = depletion_year(portfolio, annual_withdrawal, annual_return, inflation_rate, max_years)
 
 if dep_year:
-    if dep_year <= 20:
+    if dep_year < 20:
         color = COLORS["red"]
         icon  = "🚨"
         label = f"Portfolio depletes in **{dep_year} years**"
