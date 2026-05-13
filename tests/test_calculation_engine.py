@@ -55,7 +55,7 @@ def test_fire_age_found():
     # Portfolio crosses 1M at year 10 in projection
     df = pd.DataFrame({
         "Year": list(range(11)),
-        "strat_Total": [100_000 * (1.2 ** y) for y in range(11)],
+        "strat_Total": [100_000 * (1.26 ** y) for y in range(11)],
     })
     result = fire_age(current_age=30, projection_df=df, target_portfolio=1_000_000, strategy="strat")
     assert result == 30 + 10
