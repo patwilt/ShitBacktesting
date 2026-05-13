@@ -105,6 +105,7 @@ def cgt_liability(
     cpi_current: Optional[float] = None,
     is_main_residence: bool = False,
     is_new_build: bool = False,
+    cost_base: Optional[float] = None,
 ) -> float:
     """
     Capital gains tax liability.
@@ -123,17 +124,18 @@ def cgt_liability(
     # --- Proposed 2027 law ---
     if is_new_build:
         current_tax = cgt_liability(gain, held_years, marginal_rate, CGTLaw.CURRENT)
-        proposed_tax = _proposed_2027_cgt(gain, marginal_rate, cpi_at_acquisition, cpi_current)
+        proposed_tax = _proposed_2027_cgt(gain, marginal_rate, cpi_at_acquisition, cpi_current, cost_base)
         return min(current_tax, proposed_tax)
 
-    return _proposed_2027_cgt(gain, marginal_rate, cpi_at_acquisition, cpi_current)
+    return _proposed_2027_cgt(gain, marginal_rate, cpi_at_acquisition, cpi_current, cost_base)
 
 
 def _proposed_2027_cgt(
     gain: float,
-    marginal_rate: float,
+    marginal_rate_val: float,
     cpi_at_acquisition: Optional[float],
     cpi_current: Optional[float],
+    cost_base: Optional[float] = None,
 ) -> float:
     """
     Indexation method: only real gain is taxed at marginal rate.
@@ -142,18 +144,25 @@ def _proposed_2027_cgt(
     MIN_RATE = 0.30
 
     if cpi_at_acquisition and cpi_current and cpi_at_acquisition > 0:
-        inflation_adjustment = cpi_current / cpi_at_acquisition
-        real_gain = max(gain / inflation_adjustment, 0.0)
+        cpi_ratio = cpi_current / cpi_at_acquisition
+        if cost_base is not None and cost_base > 0:
+            # Correct AUS indexation: inflate cost base, tax only the real gain
+            indexed_cost_base = cost_base * cpi_ratio
+            proceeds = cost_base + gain
+            real_gain = max(proceeds - indexed_cost_base, 0.0)
+        else:
+            # Fallback when cost base unknown: deflate entire gain (conservative approximation)
+            real_gain = max(gain / cpi_ratio, 0.0)
     else:
         real_gain = gain
 
-    tax_at_marginal = real_gain * marginal_rate
+    tax_at_marginal = real_gain * marginal_rate_val
     min_tax = gain * MIN_RATE  # 30% floor on nominal gain
 
     return max(tax_at_marginal, min_tax)
 
 
-def _marginal_rate(income: float) -> float:
+def marginal_rate(income: float) -> float:
     """Marginal income tax rate for a given income level."""
     for lo, hi, rate in reversed(_BRACKETS):
         if income > lo:
@@ -177,7 +186,7 @@ def effective_tax_rate(
     ml = medicare_levy(gross_income)
     hecs = hecs_repayment(gross_income, hecs_balance)
     st = super_concessional_tax(super_contributions)
-    marginal = _marginal_rate(gross_income)
+    marginal = marginal_rate(gross_income)
     cgt = cgt_liability(cgt_gain, held_years, marginal, law,
                         acquisition_date=acquisition_date,
                         cpi_at_acquisition=cpi_at_acquisition,

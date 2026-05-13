@@ -7,7 +7,7 @@ from datetime import date
 from utils.colors import COLORS
 from engines.tax_engine import (
     CGTLaw, income_tax, medicare_levy, hecs_repayment,
-    super_concessional_tax, cgt_liability, effective_tax_rate,
+    super_concessional_tax, cgt_liability, effective_tax_rate, marginal_rate,
 )
 
 st.set_page_config(page_title="Australian Tax", page_icon="🦘", layout="wide")
@@ -32,14 +32,16 @@ with st.sidebar:
         cpi_now         = st.number_input("CPI Now",             min_value=50.0, value=115.0, step=1.0)
         acquisition_dt  = st.date_input("Acquisition Date", value=date(2025, 1, 1))
         is_new_build    = st.checkbox("New Build (transitional lower tax)", value=False)
+        cost_base       = st.number_input("Asset Cost Base (AUD)", min_value=0, value=max(0, cgt_gain - 20_000), step=5_000)
     else:
         cpi_acquisition = cpi_now = None
         acquisition_dt  = None
         is_new_build    = False
+        cost_base       = None
 
 main_res = st.sidebar.checkbox("Main Residence (CGT Exempt)", value=False)
 
-marginal_rate = income_tax(gross_income) / gross_income if gross_income > 0 else 0.0
+marg_rate = marginal_rate(gross_income)
 
 result = effective_tax_rate(
     gross_income, super_contribs, hecs_balance, cgt_gain, held_years, law,
@@ -48,12 +50,13 @@ result = effective_tax_rate(
     cpi_current=cpi_now,
 )
 cgt = cgt_liability(
-    cgt_gain, held_years, marginal_rate, law,
+    cgt_gain, held_years, marg_rate, law,
     acquisition_date=acquisition_dt,
     cpi_at_acquisition=cpi_acquisition,
     cpi_current=cpi_now,
     is_main_residence=main_res,
     is_new_build=is_new_build,
+    cost_base=cost_base,
 )
 
 st.subheader(f"{'Proposed 2027' if use_proposed else 'Current'} CGT Law")
@@ -90,8 +93,8 @@ st.plotly_chart(fig, use_container_width=True)
 st.divider()
 st.subheader("CGT: Current vs Proposed 2027 Law")
 gains     = list(range(0, 501_000, 10_000))
-curr_cgt  = [cgt_liability(g, held_years, marginal_rate, CGTLaw.CURRENT) for g in gains]
-prop_cgt  = [cgt_liability(g, held_years, marginal_rate, CGTLaw.PROPOSED_2027,
+curr_cgt  = [cgt_liability(g, held_years, marg_rate, CGTLaw.CURRENT) for g in gains]
+prop_cgt  = [cgt_liability(g, held_years, marg_rate, CGTLaw.PROPOSED_2027,
                             acquisition_date=date(2025, 1, 1),
                             cpi_at_acquisition=100.0, cpi_current=115.0) for g in gains]
 fig2 = go.Figure()
