@@ -412,54 +412,9 @@ deplete_both_w = (_lo_b + _hi_b) / 2.0
 
 ns_B, sup_B = _sim_buckets(non_super_at_fire, super_at_fire, deplete_both_w, deplete_both_w)
 
-# ── Strategy C: Non-Super First ───────────────────────────────────────────────
-# Find max bridge withdrawal W that depletes non-super to ~$0 by preservation age,
-# then switches entirely to SWR from super for the rest of retirement.
-bridge_years = max(pres_age - fire_age_target, 0)
-if bridge_years > 0:
-    def _ns_at_pres_bridge(w0: float) -> float:
-        ns, w = non_super_at_fire, w0
-        for _age in range(fire_age_target, pres_age):
-            ns = max(ns, 0.0) * (1.0 + real_port_r) - w
-            # w constant in real terms
-        return ns
-    _lo_c, _hi_c = 0.0, non_super_at_fire * 2.0
-    for _ in range(80):
-        _mid_c = (_lo_c + _hi_c) / 2.0
-        if _ns_at_pres_bridge(_mid_c) > 0:
-            _lo_c = _mid_c
-        else:
-            _hi_c = _mid_c
-    strat_C_bridge_w = (_lo_c + _hi_c) / 2.0
-else:
-    strat_C_bridge_w = swr_post_w
-
-# Strategy C post-pres: deplete super to $0 by sim_end_age (same end-goal as Strat B
-# but starting from the super balance that survived the aggressive non-super bridge).
-_post_yrs_C = max(sim_end_age - pres_age, 1)
-
-def _sup_end_C(w_post: float) -> float:
-    sup = super_at_pres_unlocked
-    for _ in range(_post_yrs_C):
-        sup = max(sup, 0.0) * (1.0 + real_sup_r) - w_post
-    return sup
-
-_lo_cp, _hi_cp = 0.0, max(super_at_pres_unlocked * 0.5, 1.0)
-for _ in range(80):
-    _mid_cp = (_lo_cp + _hi_cp) / 2.0
-    if _sup_end_C(_mid_cp) > 0:
-        _lo_cp = _mid_cp
-    else:
-        _hi_cp = _mid_cp
-strat_C_post_w = (_lo_cp + _hi_cp) / 2.0
-
-ns_C, sup_C = _sim_buckets(non_super_at_fire, super_at_fire, strat_C_bridge_w, strat_C_post_w)
-total_C = [ns + s for ns, s in zip(ns_C, sup_C)]
-
-# ── Strategy C FIRE age ───────────────────────────────────────────────────────
-# Only need non-super to cover the finite bridge period at the desired spend rate,
-# NOT an infinite SWR portfolio — so the required amount is much lower → FIRE earlier.
-# Use real_port_r (computed above) for the annuity PV factor.
+# ── Strategy C FIRE age (computed FIRST so starting values reflect early FIRE) ──
+# Only need non-super to cover the finite bridge period, not an infinite SWR
+# portfolio — so the required amount is much lower → potentially FIRE earlier.
 fire_age_C: int | None = None
 for _yr in range(len(proj_df)):
     _age_yr = current_age + _yr
@@ -475,6 +430,94 @@ for _yr in range(len(proj_df)):
     if _ns_yr >= _req_C:
         fire_age_C = _age_yr
         break
+
+# bridge_years is for Strategy A's metric label (A always fires at fire_age_target)
+bridge_years = max(pres_age - fire_age_target, 0)
+
+# ── Strategy C: Non-Super First — correct starting values ─────────────────────
+# CRITICAL FIX: if fire_age_C < fire_age_target, salary and SGC contributions
+# STOP at fire_age_C, not fire_age_target. Super accumulates fewer years of SGC
+# contributions → lower super balance at preservation age.
+fire_age_C_start = (fire_age_C if (fire_age_C and fire_age_C < fire_age_target) else fire_age_target)
+years_to_fire_C  = max(fire_age_C_start - current_age, 0)
+
+if fire_age_C_start < fire_age_target:
+    # Non-super: from proj_df at the earlier FIRE year (already in real AUD)
+    non_super_at_fire_C = float(proj_df[_strat_col].iloc[min(years_to_fire_C, len(proj_df) - 1)])
+    # Super: accumulated with SGC only up to fire_age_C_start, then deflated to real
+    _sb_C, _sal_C = float(super_balance), float(salary)
+    for _ in range(years_to_fire_C):
+        _sb_C = _sb_C * (1.0 + _r2) + _sal_C * _sgc2 * 0.85
+        _sal_C *= (1.0 + _sg2)
+    super_at_fire_C = _sb_C / (1.0 + inflation_rate / 100.0) ** years_to_fire_C if years_to_fire_C > 0 else _sb_C
+    sim_ages_C = list(range(fire_age_C_start, sim_end_age + 1))
+else:
+    non_super_at_fire_C = non_super_at_fire
+    super_at_fire_C     = super_at_fire
+    sim_ages_C          = sim_ages
+
+# Max bridge withdrawal that depletes non_super_at_fire_C to ~$0 by pres_age
+bridge_years_C = max(pres_age - fire_age_C_start, 0)
+if bridge_years_C > 0:
+    def _ns_at_pres_bridge_C(w0: float) -> float:
+        ns = non_super_at_fire_C
+        for _age in range(fire_age_C_start, pres_age):
+            ns = max(ns, 0.0) * (1.0 + real_port_r) - w0
+        return ns
+    _lo_c, _hi_c = 0.0, non_super_at_fire_C * 2.0
+    for _ in range(80):
+        _mid_c = (_lo_c + _hi_c) / 2.0
+        if _ns_at_pres_bridge_C(_mid_c) > 0:
+            _lo_c = _mid_c
+        else:
+            _hi_c = _mid_c
+    strat_C_bridge_w = (_lo_c + _hi_c) / 2.0
+else:
+    strat_C_bridge_w = swr_post_w
+
+# Super at pres_age for C: grows WITHOUT contributions after fire_age_C_start
+super_at_pres_C = super_at_fire_C * (1.0 + real_sup_r) ** bridge_years_C
+
+# Post-pres for C: deplete super_at_pres_C to $0 by sim_end_age
+_post_yrs_C = max(sim_end_age - pres_age, 1)
+
+def _sup_end_C(w_post: float) -> float:
+    sup = super_at_pres_C
+    for _ in range(_post_yrs_C):
+        sup = max(sup, 0.0) * (1.0 + real_sup_r) - w_post
+    return sup
+
+_lo_cp, _hi_cp = 0.0, max(super_at_pres_C * 0.5, 1.0)
+for _ in range(80):
+    _mid_cp = (_lo_cp + _hi_cp) / 2.0
+    if _sup_end_C(_mid_cp) > 0:
+        _lo_cp = _mid_cp
+    else:
+        _hi_cp = _mid_cp
+strat_C_post_w = (_lo_cp + _hi_cp) / 2.0
+
+# Simulate C over sim_ages_C (may start earlier than fire_age_target)
+def _sim_C(ns0: float, sup0: float, w_bridge: float, w_post: float) -> tuple[list[float], list[float]]:
+    ns, sup = ns0, sup0
+    ns_out, sup_out = [], []
+    for age in sim_ages_C:
+        ns_out.append(max(ns, 0.0))
+        sup_out.append(max(sup, 0.0))
+        if age < pres_age:
+            ns  = max(ns, 0.0) * (1.0 + real_port_r) - w_bridge
+            sup = max(sup, 0.0) * (1.0 + real_sup_r)
+        else:
+            sup_growth = max(sup, 0.0) * (1.0 + real_sup_r)
+            if sup_growth >= w_post:
+                sup = sup_growth - w_post
+                ns  = max(ns, 0.0) * (1.0 + real_port_r)
+            else:
+                sup = 0.0
+                ns  = max(ns, 0.0) * (1.0 + real_port_r) - (w_post - sup_growth)
+    return ns_out, sup_out
+
+ns_C, sup_C = _sim_C(non_super_at_fire_C, super_at_fire_C, strat_C_bridge_w, strat_C_post_w)
+total_C = [ns + s for ns, s in zip(ns_C, sup_C)]
 
 total_A = [ns + s for ns, s in zip(ns_A, sup_A)]
 total_B = [ns + s for ns, s in zip(ns_B, sup_B)]
@@ -528,9 +571,11 @@ mc3.metric(
     "📦 Strat C — Post-Super Income",
     f"${strat_C_post_w:,.0f}/yr",
     help=(
-        f"After non-super is spent by age {pres_age}, super of ${super_at_pres_unlocked:,.0f} "
-        f"is drawn at ${strat_C_post_w:,.0f}/yr (real) — depleting it to $0 by age {sim_end_age}. "
-        f"Compare: Strat A's sustainable SWR is ${swr_post_w:,.0f}/yr."
+        f"You FIRE at age {fire_age_C_start}, so SGC contributions stop then. "
+        f"Super grows without contributions from age {fire_age_C_start} → {pres_age} "
+        f"(real balance: ${super_at_pres_C:,.0f}), then drawn at ${strat_C_post_w:,.0f}/yr "
+        f"to hit $0 by age {sim_end_age}. "
+        f"Strat A's sustainable SWR: ${swr_post_w:,.0f}/yr."
     ),
 )
 
@@ -561,13 +606,13 @@ fig_buckets.add_trace(go.Scatter(
     hovertemplate="Age %{x}<br>Total B: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=_log_floor(ns_C),
+    x=sim_ages_C, y=_log_floor(ns_C),
     name="Non-Super — C (empties at pres. age)",
     line=dict(color=COLORS["yellow"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Non-Super C: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=_log_floor(total_C),
+    x=sim_ages_C, y=_log_floor(total_C),
     name="Total — C (Non-Super First)",
     line=dict(color=COLORS["mint"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Total C: $%{y:,.0f}<extra></extra>",
@@ -601,9 +646,9 @@ for target, label, clr in [
         annotation_position="bottom right",
     )
 
-nsA_dep  = next((sim_ages[i] for i, v in enumerate(ns_A)  if v <= 0), None)
-supB_dep = next((sim_ages[i] for i, v in enumerate(sup_B) if v <= 0), None)
-nsC_dep  = next((sim_ages[i] for i, v in enumerate(ns_C)  if v <= 0), None)
+nsA_dep  = next((sim_ages[i]   for i, v in enumerate(ns_A)  if v <= 0), None)
+supB_dep = next((sim_ages[i]   for i, v in enumerate(sup_B) if v <= 0), None)
+nsC_dep  = next((sim_ages_C[i] for i, v in enumerate(ns_C)  if v <= 0), None)
 if nsA_dep:
     fig_buckets.add_vline(x=nsA_dep, line_color=COLORS["red"], line_dash="dot",
                           annotation_text=f"⚠️ A: non-super depletes (age {nsA_dep})",
@@ -643,26 +688,37 @@ if fire_age_C and fire_age_C < fire_age_target:
     )
 
 # ── Milestone table ────────────────────────────────────────────────────────────
-_milestone_ages: set[int] = {sim_ages[0], sim_end_age}
-if pres_age in sim_ages:
+# Build lookups so A/B (indexed by sim_ages) and C (indexed by sim_ages_C) can
+# both be queried by age even when their simulation start ages differ.
+_ab_idx  = {age: i for i, age in enumerate(sim_ages)}
+_c_idx   = {age: i for i, age in enumerate(sim_ages_C)}
+
+_milestone_ages: set[int] = {fire_age_target, fire_age_C_start, sim_end_age}
+if pres_age in _ab_idx or pres_age in _c_idx:
     _milestone_ages.add(pres_age)
 for _dep in [supB_dep, nsC_dep, nsA_dep]:
-    if _dep and _dep in sim_ages:
+    if _dep is not None:
         _milestone_ages.add(_dep)
-if fire_age_C and fire_age_C in sim_ages:
+if fire_age_C and fire_age_C != fire_age_target:
     _milestone_ages.add(fire_age_C)
 
+def _fmt(lst: list, idx_map: dict, age: int) -> str:
+    i = idx_map.get(age)
+    return f"${lst[i]:,.0f}" if i is not None else "—"
+
 _rows = []
-for i, age in enumerate(sim_ages):
-    if age not in _milestone_ages:
+for age in sorted(_milestone_ages):
+    if age < min(sim_ages[0], sim_ages_C[0]) or age > sim_end_age:
         continue
     evts = []
-    if i == 0:
-        evts.append("🔥 FIRE")
+    if age == fire_age_target:
+        evts.append("🔥 FIRE (A/B)")
+    if fire_age_C and age == fire_age_C and fire_age_C != fire_age_target:
+        evts.append("🎯 FIRE (C)")
+    if fire_age_C_start == fire_age_target and age == fire_age_target:
+        evts.append("🎯 FIRE (C)")  # same age — note it
     if age == pres_age:
         evts.append("🔑 Super unlocked")
-    if fire_age_C and age == fire_age_C and fire_age_C != fire_age_target:
-        evts.append("🎯 Strat C FIRE")
     if supB_dep and age == supB_dep:
         evts.append("🔀 B: super→non-super")
     if nsC_dep and age == nsC_dep:
@@ -672,15 +728,15 @@ for i, age in enumerate(sim_ages):
     if age == sim_end_age:
         evts.append(f"🪦 Target age {sim_end_age}")
     _rows.append({
-        "Age": age,
-        "Event": " | ".join(evts) if evts else "—",
-        "Total A":     f"${total_A[i]:,.0f}",
-        "Non-Super A": f"${ns_A[i]:,.0f}",
-        "Super A":     f"${sup_A[i]:,.0f}",
-        "Total B":     f"${total_B[i]:,.0f}",
-        "Total C":     f"${total_C[i]:,.0f}",
-        "Non-Super C": f"${ns_C[i]:,.0f}",
-        "Super C":     f"${sup_C[i]:,.0f}",
+        "Age":         age,
+        "Event":       " | ".join(evts) if evts else "—",
+        "Total A":     _fmt(total_A, _ab_idx, age),
+        "Non-Super A": _fmt(ns_A,    _ab_idx, age),
+        "Super A":     _fmt(sup_A,   _ab_idx, age),
+        "Total B":     _fmt(total_B, _ab_idx, age),
+        "Total C":     _fmt(total_C, _c_idx,  age),
+        "Non-Super C": _fmt(ns_C,    _c_idx,  age),
+        "Super C":     _fmt(sup_C,   _c_idx,  age),
     })
 if _rows:
     st.dataframe(pd.DataFrame(_rows).set_index("Age"), width="stretch")
@@ -688,19 +744,24 @@ if _rows:
 with st.expander("📖 How to read the Three-Strategy chart"):
     _pres_ns_A = next((ns_A[i] for i, a in enumerate(sim_ages) if a == pres_age), 0) if pres_age in sim_ages else 0
     st.markdown(f"""
-All three strategies assume you FIRE at age **{fire_age_target}** and draw non-super first.
+Strategies A & B FIRE at age **{fire_age_target}**. Strategy C can FIRE as early as age **{fire_age_C_start}**.
+
+> ⚠️ **Key correction for Strategy C:** FIREing at {fire_age_C_start} means SGC contributions stop
+> **{fire_age_target - fire_age_C_start} year(s) earlier**, so super at preservation age is only
+> ~${super_at_pres_C:,.0f} vs ~${super_at_pres_unlocked:,.0f} for A & B.
 
 | | A ♻️ Sustainable | B 💥 Spend Everything | C 🏃 Non-Super First |
 |---|---|---|---|
+| **FIRE age** | {fire_age_target} | {fire_age_target} | **{fire_age_C_start}** |
 | **Bridge spend** | ${bridge_withdrawal:,.0f}/yr (your input) | ${deplete_both_w:,.0f}/yr | ${strat_C_bridge_w:,.0f}/yr |
-| **Post-super** | ${swr_post_w:,.0f}/yr SWR forever | Both to $0 by {sim_end_age} | ${swr_post_w:,.0f}/yr SWR from super |
+| **Post-super** | ${swr_post_w:,.0f}/yr SWR forever | Both to $0 by {sim_end_age} | ${strat_C_post_w:,.0f}/yr to $0 by {sim_end_age} |
+| **Super at {pres_age}** | ~${super_at_pres_unlocked:,.0f} | ~${super_at_pres_unlocked:,.0f} | ~${super_at_pres_C:,.0f} (fewer SGC yrs) |
 | **Non-super at {pres_age}** | ~${_pres_ns_A:,.0f} (keeps compounding) | Depleted | ~$0 (intentionally) |
-| **Residual wealth** | Large | $0 | Super only |
-| **Could FIRE as early as** | Age {fire_age_target} | Age {fire_age_target} | **Age {fire_age_C if fire_age_C else "?"}** |
+| **Residual wealth** | Large | $0 | $0 |
 
-**Why Strategy C unlocks earlier FIRE:** Instead of needing a portfolio large enough to fund you
-*forever* (SWR), you only need enough to fund **${bridge_withdrawal:,.0f}/yr for {max(pres_age - (fire_age_C or fire_age_target), 0)} years** until super
-kicks in. That's a finite annuity — a much smaller number — so you cross the threshold earlier.
+**Why Strategy C unlocks earlier FIRE:** You only need non-super to fund **${bridge_withdrawal:,.0f}/yr
+for {bridge_years_C} years** (age {fire_age_C_start}\u2192{pres_age}) — a finite annuity, much smaller
+than an infinite-horizon SWR portfolio. The trade-off: less super at preservation age.
 
 | Colour | Meaning |
 |--------|---------|
