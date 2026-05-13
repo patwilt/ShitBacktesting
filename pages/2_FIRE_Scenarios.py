@@ -82,19 +82,40 @@ lean_num_adj    = lean_gross / swr
 fat_num_adj     = fat_gross / swr
 barista_num_adj = barista_gross / swr
 
+# Projected age to reach each FIRE target — find best (earliest) strategy
+def _best_fire_age(target: float) -> tuple[int | None, str | None]:
+    candidates = [(fire_age(current_age, proj_df, target, s), s) for s in selected]
+    candidates = [(a, s) for a, s in candidates if a is not None]
+    if not candidates:
+        return None, None
+    return min(candidates, key=lambda x: x[0])
+
+lean_age,    lean_strat    = _best_fire_age(lean_num_adj)
+fat_age,     fat_strat     = _best_fire_age(fat_num_adj)
+barista_age, barista_strat = _best_fire_age(barista_num_adj)
+
 t_col1, t_col2, t_col3 = st.columns(3)
 with t_col1:
+    lean_delta = f"Age {lean_age} · ${lean_gross:,.0f}/yr gross" if lean_age else "Not in horizon"
     st.metric("🥦 Lean FIRE (Tax-Adjusted)", f"${lean_num_adj:,.0f}",
-              delta=f"Gross withdrawal: ${lean_gross:,.0f}/yr",
-              help=f"Portfolio needed to fund ${lean_spending:,}/yr after-tax at {swr*100:.1f}% SWR")
+              delta=lean_delta,
+              delta_color="normal" if lean_age else "off",
+              help=f"Portfolio to fund ${lean_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
+                   f"Earliest via: {lean_strat or 'N/A'}")
 with t_col2:
-    st.metric("🥩 Fat FIRE (Tax-Adjusted)",  f"${fat_num_adj:,.0f}",
-              delta=f"Gross withdrawal: ${fat_gross:,.0f}/yr",
-              help=f"Portfolio needed to fund ${fat_spending:,}/yr after-tax at {swr*100:.1f}% SWR")
+    fat_delta = f"Age {fat_age} · ${fat_gross:,.0f}/yr gross" if fat_age else "Not in horizon"
+    st.metric("🥩 Fat FIRE (Tax-Adjusted)", f"${fat_num_adj:,.0f}",
+              delta=fat_delta,
+              delta_color="normal" if fat_age else "off",
+              help=f"Portfolio to fund ${fat_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
+                   f"Earliest via: {fat_strat or 'N/A'}")
 with t_col3:
+    bar_delta = f"Age {barista_age} · ${barista_gross:,.0f}/yr gross" if barista_age else "Not in horizon"
     st.metric("☕ Barista FIRE (Tax-Adjusted)", f"${barista_num_adj:,.0f}",
-              delta=f"Gross withdrawal: ${barista_gross:,.0f}/yr",
-              help=f"Portfolio to fund ${barista_spending:,}/yr after-tax minus ${barista_income:,} part-time at {swr*100:.1f}% SWR")
+              delta=bar_delta,
+              delta_color="normal" if barista_age else "off",
+              help=f"Portfolio to fund ${barista_spending:,}/yr after-tax minus ${barista_income:,} "
+                   f"part-time at {swr*100:.1f}% SWR. Earliest via: {barista_strat or 'N/A'}")
 
 st.caption("💡 Tax-adjusted: gross withdrawal needed to yield your target spending **after** income tax, Medicare levy, and LITO.")
 
