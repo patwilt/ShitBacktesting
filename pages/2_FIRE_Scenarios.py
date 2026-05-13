@@ -599,6 +599,7 @@ fig_buckets.update_layout(
     xaxis=dict(title="Age", dtick=5),
     yaxis=dict(
         type="log",
+        range=[5, 7],          # log10(100k)=5, log10(10M)=7
         tickformat="$.3s",
         title="Portfolio Balance (Real AUD — log scale)",
     ),
