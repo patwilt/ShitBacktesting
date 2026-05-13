@@ -14,7 +14,8 @@ st.caption("Adjust your annual withdrawal and see when the money runs out.")
 with st.sidebar:
     st.header("💰 Portfolio")
     portfolio       = st.number_input("Retirement Portfolio (AUD)", min_value=0, value=1_500_000, step=50_000)
-    annual_return   = st.slider("Annual Portfolio Return (%)", 0.0, 20.0, 6.0, 0.1) / 100.0
+    annual_return   = st.slider("Annual Portfolio Return (%, nominal)", 0.0, 20.0, 6.0, 0.1,
+                                help="Nominal return before inflation. App converts to real return internally.") / 100.0
     inflation_rate  = st.slider("Inflation Rate (%)",          0.0, 10.0, 2.5, 0.1) / 100.0
     st.divider()
     st.header("💸 Withdrawal")
@@ -67,7 +68,7 @@ st.divider()
 st.subheader("Portfolio Balance Over Time")
 
 balance   = float(portfolio)
-withdrawal = float(annual_withdrawal)
+real_r_plot = (1.0 + annual_return) / (1.0 + inflation_rate) - 1.0
 years_plot = []
 values_plot = []
 for y in range(max_years + 1):
@@ -75,8 +76,8 @@ for y in range(max_years + 1):
     values_plot.append(max(balance, 0))
     if balance <= 0:
         break
-    balance = balance * (1.0 + annual_return) - withdrawal
-    withdrawal *= (1.0 + inflation_rate)
+    # Withdrawal stays constant in real terms; balance in today's AUD
+    balance = balance * (1.0 + real_r_plot) - annual_withdrawal
 
 fig = go.Figure()
 balance_color = [
@@ -109,7 +110,7 @@ if dep_year and dep_year <= max_years:
 fig.update_layout(
     template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
     xaxis=dict(title="Years in Retirement", dtick=5),
-    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Nominal AUD)"),
+    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Real AUD — today's dollars)"),
     height=500,
 )
 st.plotly_chart(fig, width='stretch')
@@ -125,7 +126,8 @@ with st.expander("📖 How to read this chart"):
 
 **The withdrawal slider** adjusts your annual drawdown. The depletion year updates in real time.
 
-**Inflation effect:** Each year your withdrawal amount increases by the inflation rate, so the real purchasing power of your spending stays constant — but it depletes your portfolio faster.
+**Inflation effect:** Your withdrawal amount stays constant in **real** (today's) purchasing power.
+The chart shows balances in today's dollars — the real return (nominal minus inflation) is used internally.
 
 **Safe zone guide:**
 | Depletion Year | Signal |
@@ -153,4 +155,4 @@ import pandas as pd
 dep_df = pd.DataFrame(strategy_dep_data).set_index("Strategy")
 st.dataframe(dep_df, width='stretch')
 
-st.caption("⚠️ Values in nominal AUD (inflation reduces real purchasing power). Uses median historical CAGR from backtest data.")
+st.caption("⚠️ Values in real AUD (today's purchasing power). Nominal returns converted to real returns internally. Uses median historical CAGR from backtest data.")

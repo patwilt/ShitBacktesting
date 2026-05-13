@@ -51,7 +51,8 @@ with st.sidebar:
         help=f"Auto-set to {_default_pres} from your birth year. Override here if the law changes.",
     )
     super_balance = st.number_input("Current Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
-    super_return  = st.slider("Super Annual Return (%)", 3.0, 12.0, 7.0, 0.5)
+    super_return  = st.slider("Super Annual Return (%, nominal)", 3.0, 12.0, 7.0, 0.5,
+                              help="Nominal return before inflation. App converts to real return internally.")
     sgc_rate      = st.slider(
         "Super Contribution Rate (%)", 8.0, 30.0, 11.5, 0.5,
         help="Employer SGC is 11.5% in 2024-25, rising to 12% from 1 July 2025. "
@@ -244,16 +245,19 @@ for _ in range(years_to_pres):
     _annual_contribs_total += net_contrib
     _current_sal     *= (1.0 + _sg)
 
-super_at_pres       = _super_bal
-avg_annual_contrib  = _annual_contribs_total / years_to_pres if years_to_pres > 0 else 0.0
+# Deflate nominal accumulation to real (today's purchasing power)
+_inf_deflator = (1.0 + inflation_rate / 100.0) ** years_to_pres if years_to_pres > 0 else 1.0
+super_at_pres       = _super_bal / _inf_deflator
+avg_annual_contrib  = (_annual_contribs_total / years_to_pres / _inf_deflator) if years_to_pres > 0 else 0.0
 
 sc2.metric(
-    f"💰 Projected Super at Age {pres_age}", f"${super_at_pres:,.0f}",
+    f"💰 Projected Super at Age {pres_age} (Real)", f"${super_at_pres:,.0f}",
     help=(
         f"Starting balance: ${super_balance:,}  ·  "
-        f"Avg annual contribution (net of 15% tax): ~${avg_annual_contrib:,.0f}  ·  "
-        f"Return: {super_return}%/yr  ·  Salary growth: {salary_growth}%/yr  ·  "
-        f"Over {years_to_pres} years"
+        f"Avg annual contribution (net of 15% tax, real): ~${avg_annual_contrib:,.0f}  ·  "
+        f"Return: {super_return}%/yr nominal  ·  Inflation: {inflation_rate}%/yr  ·  "
+        f"Real return: {(_r - inflation_rate/100)*100:.1f}%/yr  ·  "
+        f"Value in today's (real) AUD over {years_to_pres} years"
     ),
 )
 
@@ -287,13 +291,15 @@ port_return     = float(data.cagr_df[median_strat].median()) if (median_strat an
 _strat_col = f"{median_strat}_Total" if (median_strat and f"{median_strat}_Total" in proj_df.columns) else f"{selected[0]}_Total"
 non_super_at_fire = float(proj_df[_strat_col].iloc[min(years_to_fire, len(proj_df) - 1)])
 
-# Super balance at FIRE age (accumulate with SGC contributions up to FIRE age)
+# Super balance at FIRE age (accumulate with SGC contributions up to FIRE age in nominal,
+# then deflate to real/today's AUD so it's comparable with non_super_at_fire from proj_df)
 _r2, _sg2, _sgc2 = super_return / 100.0, salary_growth / 100.0, sgc_rate / 100.0
 _sb2, _sal2 = float(super_balance), float(salary)
 for _ in range(years_to_fire):
     _sb2  = _sb2 * (1.0 + _r2) + _sal2 * _sgc2 * 0.85
     _sal2 *= (1.0 + _sg2)
-super_at_fire = _sb2
+# Deflate nominal accumulation → real (today's purchasing power)
+super_at_fire = _sb2 / (1.0 + inflation_rate / 100.0) ** years_to_fire if years_to_fire > 0 else _sb2
 
 # ── Controls ──────────────────────────────────────────────────────────────────
 ctrl1, ctrl2 = st.columns([2, 1])
@@ -307,6 +313,10 @@ with ctrl2:
     )
 
 inf_r = inflation_rate / 100.0
+# Real returns: (1 + nominal) / (1 + inflation) - 1
+# All bucket simulations use real returns so balances stay in today's AUD.
+real_port_r = (1.0 + port_return) / (1.0 + inf_r) - 1.0
+real_sup_r  = (1.0 + _r2) / (1.0 + inf_r) - 1.0
 sim_ages = list(range(fire_age_target, sim_end_age + 1))
 
 # ── Helper: simulate two-bucket drawdown with a fixed initial withdrawal ──────
@@ -315,10 +325,10 @@ def _sim_buckets(
     w0_bridge: float, w0_post: float,
 ) -> tuple[list[float], list[float]]:
     """
-    Simulate from fire_age_target to sim_end_age.
+    Simulate from fire_age_target to sim_end_age using REAL returns.
+    All values are in today's (real) AUD; withdrawals are constant in real terms.
     Bridge phase (before pres_age): draw w_bridge from non-super; super compounds.
     Post-pres phase: draw w_post from super first; overflow to non-super if super empty.
-    Both w values inflate by inf_r each year.
     """
     ns, sup = ns0, sup0
     w_b, w_p = w0_bridge, w0_post
@@ -327,20 +337,20 @@ def _sim_buckets(
         ns_out.append(max(ns, 0.0))
         sup_out.append(max(sup, 0.0))
         if age < pres_age:
-            ns  = max(ns, 0.0) * (1.0 + port_return) - w_b
-            sup = max(sup, 0.0) * (1.0 + _r2)
-            w_b *= (1.0 + inf_r)
+            ns  = max(ns, 0.0) * (1.0 + real_port_r) - w_b
+            sup = max(sup, 0.0) * (1.0 + real_sup_r)
+            # No w_b inflation — withdrawal is constant in real terms
         else:
             draw = w_p
-            sup_growth = max(sup, 0.0) * (1.0 + _r2)
+            sup_growth = max(sup, 0.0) * (1.0 + real_sup_r)
             if sup_growth >= draw:
                 sup = sup_growth - draw
-                ns  = max(ns, 0.0) * (1.0 + port_return)
+                ns  = max(ns, 0.0) * (1.0 + real_port_r)
             else:
                 leftover = draw - sup_growth
                 sup = 0.0
-                ns  = max(ns, 0.0) * (1.0 + port_return) - leftover
-            w_p *= (1.0 + inf_r)
+                ns  = max(ns, 0.0) * (1.0 + real_port_r) - leftover
+            # No w_p inflation
     return ns_out, sup_out
 
 # ── Strategy A: SWR — draw SWR% of super post-preservation; non-super compounds
@@ -356,12 +366,12 @@ swr_post_w = (
     ) * 0.0  # placeholder; we'll compute below
 )
 
-# Properly compute super at pres_age (compounding, no contributions post-FIRE)
-_ns_p, _sup_p, _wb = non_super_at_fire, super_at_fire, float(bridge_withdrawal)
+# Properly compute super at pres_age in real terms (compound without contributions post-FIRE,
+# using real super return; non-super uses real portfolio return)
+_ns_p, _sup_p = non_super_at_fire, super_at_fire
 for _age in range(fire_age_target, pres_age):
-    _ns_p  = max(_ns_p, 0.0) * (1.0 + port_return) - _wb
-    _sup_p = max(_sup_p, 0.0) * (1.0 + _r2)
-    _wb   *= (1.0 + inf_r)
+    _ns_p  = max(_ns_p, 0.0) * (1.0 + real_port_r) - float(bridge_withdrawal)
+    _sup_p = max(_sup_p, 0.0) * (1.0 + real_sup_r)
 super_at_pres_unlocked = max(_sup_p, 0.0)
 swr_post_w = super_at_pres_unlocked * swr
 
@@ -373,21 +383,21 @@ ns_A, sup_A = _sim_buckets(non_super_at_fire, super_at_fire, float(bridge_withdr
 # Single W is used for both bridge AND post-pres phases.
 
 def _end_total(w0: float) -> float:
-    """Return combined portfolio balance at sim_end_age (can be negative = over-drawn)."""
+    """Return combined portfolio balance at sim_end_age using real returns (can be negative)."""
     ns, sup, w = non_super_at_fire, super_at_fire, w0
     for age in range(fire_age_target, sim_end_age):
         if age < pres_age:
-            ns  = ns * (1.0 + port_return) - w
-            sup = sup * (1.0 + _r2)
+            ns  = ns * (1.0 + real_port_r) - w
+            sup = sup * (1.0 + real_sup_r)
         else:
-            sup_after = sup * (1.0 + _r2) - w
+            sup_after = sup * (1.0 + real_sup_r) - w
             if sup_after >= 0:
                 sup = sup_after
-                ns  = ns * (1.0 + port_return)
+                ns  = ns * (1.0 + real_port_r)
             else:
-                ns  = ns * (1.0 + port_return) + sup_after  # sup_after < 0
+                ns  = ns * (1.0 + real_port_r) + sup_after
                 sup = 0.0
-        w *= (1.0 + inf_r)
+        # w stays constant — it's in real terms
     return ns + sup
 
 # Bracket: lo leaves money on table; hi bankrupts before sim_end_age
@@ -410,8 +420,8 @@ if bridge_years > 0:
     def _ns_at_pres_bridge(w0: float) -> float:
         ns, w = non_super_at_fire, w0
         for _age in range(fire_age_target, pres_age):
-            ns = max(ns, 0.0) * (1.0 + port_return) - w
-            w *= (1.0 + inf_r)
+            ns = max(ns, 0.0) * (1.0 + real_port_r) - w
+            # w constant in real terms
         return ns
     _lo_c, _hi_c = 0.0, non_super_at_fire * 2.0
     for _ in range(80):
@@ -430,7 +440,7 @@ total_C = [ns + s for ns, s in zip(ns_C, sup_C)]
 # ── Strategy C FIRE age ───────────────────────────────────────────────────────
 # Only need non-super to cover the finite bridge period at the desired spend rate,
 # NOT an infinite SWR portfolio — so the required amount is much lower → FIRE earlier.
-_real_r_C = port_return - inf_r
+# Use real_port_r (computed above) for the annuity PV factor.
 fire_age_C: int | None = None
 for _yr in range(len(proj_df)):
     _age_yr = current_age + _yr
@@ -438,10 +448,10 @@ for _yr in range(len(proj_df)):
         fire_age_C = _age_yr
         break
     _byr = max(pres_age - _age_yr, 1)
-    if abs(_real_r_C) < 1e-9:
+    if abs(real_port_r) < 1e-9:
         _req_C = float(bridge_withdrawal) * float(_byr)
     else:
-        _req_C = float(bridge_withdrawal) * (1.0 - (1.0 + _real_r_C) ** (-_byr)) / _real_r_C
+        _req_C = float(bridge_withdrawal) * (1.0 - (1.0 + real_port_r) ** (-_byr)) / real_port_r
     _ns_yr = float(proj_df[_strat_col].iloc[_yr]) if _strat_col in proj_df.columns else 0.0
     if _ns_yr >= _req_C:
         fire_age_C = _age_yr
@@ -502,36 +512,39 @@ mc3.metric(
 )
 
 # ── Chart ─────────────────────────────────────────────────────────────────────
+# Log scale can't plot 0 — clamp depleted values to $1 so the line stays visible.
+_log_floor = lambda vals: [max(v, 1.0) for v in vals]
+
 fig_buckets = go.Figure()
 
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=ns_A,
+    x=sim_ages, y=_log_floor(ns_A),
     name="Non-Super — A", fill="tozeroy",
     line=dict(color=COLORS["blue"], width=2),
     fillcolor="rgba(9,132,227,0.12)",
     hovertemplate="Age %{x}<br>Non-Super A: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=total_A,
+    x=sim_ages, y=_log_floor(total_A),
     name="Total — A (SWR, sustainable)", fill="tonexty",
     line=dict(color=COLORS["purple"], width=2),
     fillcolor="rgba(108,92,231,0.18)",
     hovertemplate="Age %{x}<br>Total A: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=total_B,
+    x=sim_ages, y=_log_floor(total_B),
     name="Total — B (Deplete Both)",
     line=dict(color=COLORS["orange"], width=2, dash="dash"),
     hovertemplate="Age %{x}<br>Total B: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=ns_C,
+    x=sim_ages, y=_log_floor(ns_C),
     name="Non-Super — C (empties at pres. age)",
     line=dict(color=COLORS["yellow"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Non-Super C: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
-    x=sim_ages, y=total_C,
+    x=sim_ages, y=_log_floor(total_C),
     name="Total — C (Non-Super First)",
     line=dict(color=COLORS["mint"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Total C: $%{y:,.0f}<extra></extra>",
@@ -584,7 +597,11 @@ if nsC_dep:
 fig_buckets.update_layout(
     template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
     xaxis=dict(title="Age", dtick=5),
-    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Real AUD)"),
+    yaxis=dict(
+        type="log",
+        tickformat="$.3s",
+        title="Portfolio Balance (Real AUD — log scale)",
+    ),
     hovermode="x unified", height=540,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
@@ -642,7 +659,7 @@ for i, age in enumerate(sim_ages):
         "Super C":     f"${sup_C[i]:,.0f}",
     })
 if _rows:
-    st.dataframe(pd.DataFrame(_rows).set_index("Age"), use_container_width=True)
+    st.dataframe(pd.DataFrame(_rows).set_index("Age"), width="stretch")
 
 with st.expander("📖 How to read the Three-Strategy chart"):
     _pres_ns_A = next((ns_A[i] for i, a in enumerate(sim_ages) if a == pres_age), 0) if pres_age in sim_ages else 0

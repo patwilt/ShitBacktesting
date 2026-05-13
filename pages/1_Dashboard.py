@@ -33,7 +33,8 @@ with st.sidebar:
     st.divider()
     st.header("📉 Assumptions")
     inflation_rate  = st.slider("Inflation Rate (%)",  0.0, 10.0, 2.5, 0.1, help="Annual CPI assumption")
-    annual_return   = st.slider("Expected Return (%)", 0.0, 20.0, 7.0, 0.1, help="Median annual portfolio return")
+    annual_return   = st.slider("Expected Return (%, nominal)", 0.0, 20.0, 7.0, 0.1,
+                                help="Nominal return before inflation. Used for Coast FIRE discounting — converted to real return internally.")
     target_spending = st.number_input("Annual Retirement Spending (AUD)", min_value=0, value=80_000, step=5_000)
     swr             = st.slider("Safe Withdrawal Rate (%)", 2.0, 6.0, 4.0, 0.25, help="Annual % withdrawn in retirement") / 100.0
 
@@ -47,7 +48,8 @@ st.caption(f"Using: `{csv_path}`")
 
 years_to_retire = target_retire_age - current_age
 fire_num        = fire_target(target_spending, swr)
-coast_num       = coast_fire_target(fire_num, years_to_retire, annual_return / 100.0)
+_real_r         = (1 + annual_return / 100) / (1 + inflation_rate / 100) - 1
+coast_num       = coast_fire_target(fire_num, years_to_retire, _real_r)
 fire_num_tax_adj = gross_withdrawal_for_net_spend(target_spending) / swr
 
 strategy_cols = data.strategies

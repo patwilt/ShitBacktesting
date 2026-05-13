@@ -14,14 +14,16 @@ def depletion_year(
     max_years: int = 100,
 ) -> Optional[int]:
     """
-    Simulate annual withdrawals (inflation-adjusted each year) until the portfolio
-    is exhausted. Returns the year it hits zero, or None if it survives max_years.
+    Simulate annual withdrawals in real (inflation-adjusted) terms.
+    Converts the nominal annual_return to a real return so the balance and
+    withdrawal are both in today's AUD throughout — no need to grow the
+    withdrawal by inflation year-on-year.
+    Returns the year the portfolio hits zero, or None if it survives max_years.
     """
     balance = float(portfolio)
-    real_withdrawal = float(annual_withdrawal)
+    real_return = (1.0 + annual_return) / (1.0 + inflation_rate) - 1.0
     for year in range(1, max_years + 1):
-        balance = balance * (1.0 + annual_return) - real_withdrawal
-        real_withdrawal *= (1.0 + inflation_rate)
+        balance = balance * (1.0 + real_return) - annual_withdrawal
         if balance <= 0.0:
             return year
     return None
