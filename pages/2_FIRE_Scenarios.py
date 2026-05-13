@@ -31,6 +31,8 @@ with st.sidebar:
     st.divider()
     st.header("📉 Spending Targets")
     lean_spending    = st.number_input("Lean FIRE Spending/yr",   min_value=0, value=40_000, step=5_000)
+    median_spending  = st.number_input("Your FIRE Spending/yr",   min_value=0, value=80_000, step=5_000,
+                                       help="Your personal target spending in retirement, after tax.")
     fat_spending     = st.number_input("Fat FIRE Spending/yr",    min_value=0, value=120_000, step=5_000)
     barista_income   = st.number_input("Barista Part-Time Income", min_value=0, value=20_000, step=2_000)
     barista_spending = st.number_input("Barista Total Spending",   min_value=0, value=60_000, step=5_000)
@@ -75,11 +77,13 @@ bridge_cols = st.columns(4)
 
 # Tax-adjusted gross withdrawals needed to fund each target after tax
 lean_gross    = gross_withdrawal_for_net_spend(lean_spending)
+median_gross  = gross_withdrawal_for_net_spend(median_spending)
 fat_gross     = gross_withdrawal_for_net_spend(fat_spending)
 barista_gross = gross_withdrawal_for_net_spend(max(barista_spending - barista_income, 0))
 
-lean_num_adj    = lean_gross / swr
-fat_num_adj     = fat_gross / swr
+lean_num_adj    = lean_gross    / swr
+median_num_adj  = median_gross  / swr
+fat_num_adj     = fat_gross     / swr
 barista_num_adj = barista_gross / swr
 
 # Projected age to reach each FIRE target — find best (earliest) strategy
@@ -91,33 +95,43 @@ def _best_fire_age(target: float) -> tuple[int | None, str | None]:
     return min(candidates, key=lambda x: x[0])
 
 lean_age,    lean_strat    = _best_fire_age(lean_num_adj)
+median_age,  median_strat  = _best_fire_age(median_num_adj)
 fat_age,     fat_strat     = _best_fire_age(fat_num_adj)
 barista_age, barista_strat = _best_fire_age(barista_num_adj)
 
-t_col1, t_col2, t_col3 = st.columns(3)
+t_col1, t_col2, t_col3, t_col4 = st.columns(4)
 with t_col1:
     lean_delta = f"Age {lean_age} · ${lean_gross:,.0f}/yr gross" if lean_age else "Not in horizon"
     st.metric("🥦 Lean FIRE (Tax-Adjusted)", f"${lean_num_adj:,.0f}",
-              delta=lean_delta,
-              delta_color="normal" if lean_age else "off",
+              delta=lean_delta, delta_color="normal" if lean_age else "off",
               help=f"Portfolio to fund ${lean_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
                    f"Earliest via: {lean_strat or 'N/A'}")
 with t_col2:
+    med_delta = f"Age {median_age} · ${median_gross:,.0f}/yr gross" if median_age else "Not in horizon"
+    st.metric("🎯 Your FIRE (Tax-Adjusted)", f"${median_num_adj:,.0f}",
+              delta=med_delta, delta_color="normal" if median_age else "off",
+              help=f"Portfolio to fund ${median_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
+                   f"Earliest via: {median_strat or 'N/A'}")
+with t_col3:
     fat_delta = f"Age {fat_age} · ${fat_gross:,.0f}/yr gross" if fat_age else "Not in horizon"
     st.metric("🥩 Fat FIRE (Tax-Adjusted)", f"${fat_num_adj:,.0f}",
-              delta=fat_delta,
-              delta_color="normal" if fat_age else "off",
+              delta=fat_delta, delta_color="normal" if fat_age else "off",
               help=f"Portfolio to fund ${fat_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
                    f"Earliest via: {fat_strat or 'N/A'}")
-with t_col3:
+with t_col4:
     bar_delta = f"Age {barista_age} · ${barista_gross:,.0f}/yr gross" if barista_age else "Not in horizon"
     st.metric("☕ Barista FIRE (Tax-Adjusted)", f"${barista_num_adj:,.0f}",
-              delta=bar_delta,
-              delta_color="normal" if barista_age else "off",
+              delta=bar_delta, delta_color="normal" if barista_age else "off",
               help=f"Portfolio to fund ${barista_spending:,}/yr after-tax minus ${barista_income:,} "
                    f"part-time at {swr*100:.1f}% SWR. Earliest via: {barista_strat or 'N/A'}")
 
-st.caption("💡 Tax-adjusted: gross withdrawal needed to yield your target spending **after** income tax, Medicare levy, and LITO.")
+st.caption(
+    f"💡 **Tax-adjusted** figures show the gross withdrawal needed to yield your target spending "
+    f"**after** income tax, Medicare levy, and LITO.  "
+    f"Your FIRE number: **${median_num_adj:,.0f}** "
+    f"(${median_spending:,}/yr after-tax · gross ${median_gross:,.0f}/yr · "
+    f"{'age ' + str(median_age) if median_age else 'not in horizon'})."
+)
 
 st.divider()
 st.subheader("🚀 The Double Crossover")
