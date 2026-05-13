@@ -51,6 +51,11 @@ with st.sidebar:
     )
     super_balance = st.number_input("Current Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
     super_return  = st.slider("Super Annual Return (%)", 3.0, 12.0, 7.0, 0.5)
+    sgc_rate      = st.slider(
+        "Super Contribution Rate (%)", 8.0, 30.0, 11.5, 0.5,
+        help="Employer SGC is 11.5% in 2024-25, rising to 12% from 1 July 2025. "
+             "Add voluntary contributions here too.",
+    )
 
 result = load_latest_backtest_csv()
 if result is None:
@@ -221,11 +226,35 @@ sc1, sc2, sc3 = st.columns(3)
 sc1.metric("🔑 Super Preservation Age", str(pres_age),
            help="Age you can first access your superannuation (based on birth year)")
 
-# Estimate super balance at preservation age
-years_to_pres = max(pres_age - current_age, 0)
-super_at_pres = super_balance * ((1 + super_return / 100) ** years_to_pres)
-sc2.metric(f"💰 Projected Super at Age {pres_age}", f"${super_at_pres:,.0f}",
-           help=f"${super_balance:,} growing at {super_return}%/yr for {years_to_pres} yrs")
+# Project super balance to preservation age:
+# each year — grow existing balance, add net-of-tax employer/voluntary contributions
+# salary grows at salary_growth rate; SGC contributions taxed at 15% flat
+years_to_pres  = max(pres_age - current_age, 0)
+_r             = super_return / 100.0
+_sg            = salary_growth / 100.0
+_sgc           = sgc_rate / 100.0
+_super_bal     = float(super_balance)
+_current_sal   = float(salary)
+_annual_contribs_total = 0.0
+
+for _ in range(years_to_pres):
+    net_contrib       = _current_sal * _sgc * (1.0 - 0.15)   # 15% contributions tax
+    _super_bal        = _super_bal * (1.0 + _r) + net_contrib
+    _annual_contribs_total += net_contrib
+    _current_sal     *= (1.0 + _sg)
+
+super_at_pres       = _super_bal
+avg_annual_contrib  = _annual_contribs_total / years_to_pres if years_to_pres > 0 else 0.0
+
+sc2.metric(
+    f"💰 Projected Super at Age {pres_age}", f"${super_at_pres:,.0f}",
+    help=(
+        f"Starting balance: ${super_balance:,}  ·  "
+        f"Avg annual contribution (net of 15% tax): ~${avg_annual_contrib:,.0f}  ·  "
+        f"Return: {super_return}%/yr  ·  Salary growth: {salary_growth}%/yr  ·  "
+        f"Over {years_to_pres} years"
+    ),
+)
 
 super_swr_income = super_at_pres * swr
 sc3.metric("📥 Super SWR Income", f"${super_swr_income:,.0f}/yr",
