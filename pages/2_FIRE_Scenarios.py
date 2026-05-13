@@ -41,6 +41,12 @@ with st.sidebar:
     st.divider()
     st.header("🏦 Superannuation")
     birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2005, value=1990, step=1)
+    _default_pres = preservation_age(birth_year)
+    pres_age      = st.number_input(
+        "Super Access Age",
+        min_value=55, max_value=75, value=_default_pres, step=1,
+        help=f"Auto-set to {_default_pres} from your birth year. Override here if the law changes.",
+    )
     super_balance = st.number_input("Current Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
     super_return  = st.slider("Super Annual Return (%)", 3.0, 12.0, 7.0, 0.5)
 
@@ -65,7 +71,6 @@ lean_num    = lean_fire_target(lean_spending, swr)
 fat_num     = fat_fire_target(fat_spending, swr)
 barista_num = barista_fire_target(barista_spending, barista_income, swr)
 
-pres_age    = preservation_age(birth_year)
 bridge_cols = st.columns(4)
 
 # Tax-adjusted gross withdrawals needed to fund each target after tax

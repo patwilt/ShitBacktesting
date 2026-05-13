@@ -23,6 +23,12 @@ with st.sidebar:
     monthly_dca       = st.number_input("Monthly DCA (AUD)",       min_value=0, value=1_500,  step=100)
     salary            = st.number_input("Annual Salary (AUD)",     min_value=0, value=100_000, step=5_000)
     birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2005, value=1990, step=1)
+    _default_pres = preservation_age(birth_year)
+    pres_age      = st.number_input(
+        "Super Access Age",
+        min_value=55, max_value=75, value=_default_pres, step=1,
+        help=f"Auto-set to {_default_pres} from your birth year. Override here if the law changes.",
+    )
     super_balance = st.number_input("Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
     st.divider()
     st.header("📉 Assumptions")
@@ -43,7 +49,6 @@ years_to_retire = target_retire_age - current_age
 fire_num        = fire_target(target_spending, swr)
 coast_num       = coast_fire_target(fire_num, years_to_retire, annual_return / 100.0)
 fire_num_tax_adj = gross_withdrawal_for_net_spend(target_spending) / swr
-pres_age         = preservation_age(birth_year)
 
 strategy_cols = data.strategies
 proj_df = run_yearly_projection(
