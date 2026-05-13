@@ -108,10 +108,35 @@ if dep_year and dep_year <= max_years:
 
 fig.update_layout(
     template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
-    xaxis_title="Years in Retirement", yaxis_title="Portfolio Balance (Nominal AUD)",
+    xaxis=dict(title="Years in Retirement", dtick=5),
+    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Nominal AUD)"),
     height=500,
 )
 st.plotly_chart(fig, use_container_width=True)
+
+with st.expander("📖 How to read this chart"):
+    st.markdown("""
+**Portfolio Balance Over Time** simulates your retirement portfolio being drawn down each year.
+
+- **Blue line / shaded area** — your portfolio balance, year by year
+- **Orange dashed line (50%)** — caution zone: below this your portfolio may not last
+- **Red zone (shading)** — danger zone: below 50% of starting balance
+- **Red vertical line** — the year your portfolio hits zero (depletion year)
+
+**The withdrawal slider** adjusts your annual drawdown. The depletion year updates in real time.
+
+**Inflation effect:** Each year your withdrawal amount increases by the inflation rate, so the real purchasing power of your spending stays constant — but it depletes your portfolio faster.
+
+**Safe zone guide:**
+| Depletion Year | Signal |
+|----------------|--------|
+| Never depletes | 🏆 Sustainable indefinitely |
+| > 30 years | ✅ Generally safe for a 30-year retirement |
+| 20–30 years | ⚠️ Moderate risk — consider reducing spending |
+| < 20 years | 🚨 High risk — portfolio likely insufficient |
+
+> Values shown in nominal (not inflation-adjusted) AUD. Your real spending power declines over time due to inflation.
+""")
 
 st.divider()
 st.subheader("Strategy-Specific Depletion Comparison")

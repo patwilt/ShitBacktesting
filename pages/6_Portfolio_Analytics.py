@@ -34,6 +34,7 @@ fig_bar.add_trace(go.Bar(x=selected, y=[abs(medians_mdd.get(s, 0))*100 for s in 
                           hovertemplate="%{x}<br>MDD: %{y:.1f}%<extra></extra>"))
 fig_bar.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                       barmode="group", yaxis_title="(%)", height=400,
+                      xaxis=dict(tickangle=-20),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -47,7 +48,8 @@ for i, strat in enumerate(selected):
         hovertemplate=f"{strat}<br>%{{x|%Y-%m-%d}}: %{{y:.1f}}%<extra></extra>",
     ))
 fig_roll.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
-                       xaxis_title="Window End Date", yaxis_title="20-Year CAGR (%)",
+                       xaxis=dict(title="Window End Date"),
+                       yaxis=dict(tickformat=".1f", ticksuffix="%", title="20-Year CAGR"),
                        height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_roll, use_container_width=True)
 
@@ -62,6 +64,29 @@ fig_scatter.update_layout(paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                            xaxis_title="Median Max Drawdown (%)", yaxis_title="Median CAGR (%)",
                            showlegend=False, height=400)
 st.plotly_chart(fig_scatter, use_container_width=True)
+
+with st.expander("📖 How to read these charts"):
+    st.markdown("""
+**Median CAGR vs Max Drawdown (bar chart)**
+- **Green bars** — median 20-year Compound Annual Growth Rate across all rolling windows
+- **Orange bars** — median Maximum Drawdown (worst peak-to-trough decline in a window)
+- Higher CAGR + lower MDD = better risk-adjusted return
+
+**Rolling CAGR Over Time (line chart)**
+- Each point = the 20-year CAGR of a window ending on that date
+- Dips = windows that included major market crashes (2000–2002, 2008–2009)
+- Consistency matters: a strategy with less volatile CAGR is more predictable
+
+**Risk-Return Scatter**
+- X-axis = how bad the drawdowns were (further right = more painful crashes)
+- Y-axis = how good the returns were (higher = better growth)
+- **Ideal position: top-left** — high return, low drawdown
+- Distance from origin = overall return/risk profile
+
+**Asset Allocation pies**
+- Show the target weighting for each strategy
+- Parsed directly from the strategy name (e.g. "Hybrid SPY (70/15/15)" → 70% SPY, 15% UPRO, 15% Gold)
+""")
 
 st.divider()
 st.subheader("Asset Allocation")

@@ -118,14 +118,17 @@ for i, strat in enumerate(selected):
                               hovertemplate=f"{strat}: $%{{y:,.0f}}<extra></extra>"))
     dca_yr = dca_crossover_year(proj_df, strat)
     sal_yr = salary_crossover_year(proj_df, strat)
+    ay_offset = -40 - i * 25
     if dca_yr and dca_yr < len(proj_df):
         fig.add_annotation(x=dca_yr + current_age, y=float(proj_df["Yearly_DCA"].iloc[dca_yr]),
-                           text=f"Coast Yr {dca_yr}", showarrow=True, arrowhead=2, ax=-40, ay=-40,
-                           bgcolor=COLORS["blue"], font=dict(color="white", size=11))
+                           text=f"Coast {strat[:8]} yr {dca_yr}", showarrow=True, arrowhead=2,
+                           ax=-40, ay=ay_offset,
+                           bgcolor=COLORS["blue"], font=dict(color="white", size=10))
     if sal_yr and sal_yr < len(proj_df):
         fig.add_annotation(x=sal_yr + current_age, y=float(proj_df["Salary"].iloc[sal_yr]),
-                           text=f"FI Yr {sal_yr}", showarrow=True, arrowhead=1, ax=40, ay=-40,
-                           bgcolor=color, font=dict(color="white", size=11))
+                           text=f"FI {strat[:8]} yr {sal_yr}", showarrow=True, arrowhead=1,
+                           ax=40, ay=ay_offset,
+                           bgcolor=color, font=dict(color="white", size=10))
 
 # Super preservation age vertical line
 if pres_age <= current_age + horizon_years:
@@ -135,10 +138,33 @@ if pres_age <= current_age + horizon_years:
                   annotation_position="top right")
 
 fig.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
-                  xaxis_title="Age", yaxis_title="Annual Amount (Real AUD)",
+                  xaxis=dict(title="Age", dtick=5),
+                  yaxis=dict(tickformat="$.3s", title="Annual Amount (Real AUD)"),
                   hovermode="x unified", height=550,
                   legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig, use_container_width=True)
+
+with st.expander("📖 How to read the Double Crossover chart"):
+    st.markdown("""
+**The Double Crossover** reveals two critical moments on your path to FIRE:
+
+| Crossover | What it means |
+|-----------|---------------|
+| **Annual Profit > Annual DCA** (Coast point) | Your portfolio's yearly growth exceeds what you're contributing. You could stop investing and still reach FIRE. |
+| **Annual Profit > Annual Salary** (FI point) | Your portfolio generates more each year than your job does. You are financially independent. |
+
+**Reading the lines:**
+- **Yellow** — your gross salary, growing with salary growth rate
+- **Dotted yellow** — your annual DCA contribution
+- **Coloured lines** — each strategy's annual investment profit (growth minus contributions)
+
+**What to look for:**
+- The earlier the crossovers occur, the sooner you reach each milestone
+- A steep profit line = strong compounding effect
+- If profit never crosses salary in your horizon, extend the horizon or increase DCA
+
+> Tax-adjusted FIRE numbers account for income tax and Medicare levy using 2024-25 rates + LITO.
+""")
 
 milestones = []
 for strat in selected:

@@ -108,20 +108,34 @@ for i, strat in enumerate(strategy_cols):
     ))
 
 fig.add_hline(y=fire_num, line_dash="dash", line_color=COLORS["yellow"],
-              annotation_text=f"FIRE Number ${fire_num/1e6:.1f}M",
-              annotation_font_color=COLORS["yellow"])
+              annotation_text=f"FIRE ${fire_num/1e6:.2f}M",
+              annotation_font_color=COLORS["yellow"],
+              annotation_position="bottom right")
 
 fig.update_layout(
     template="plotly_dark",
     paper_bgcolor="#0d1117",
     plot_bgcolor="#0d1117",
-    xaxis_title="Age",
-    yaxis_title="Portfolio Value (Real AUD)",
+    xaxis=dict(title="Age", dtick=5),
+    yaxis=dict(tickformat="$.3s", title="Portfolio Value (Real AUD)"),
     hovermode="x unified",
     height=500,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
 st.plotly_chart(fig, use_container_width=True)
+
+with st.expander("📖 How to read this chart"):
+    st.markdown("""
+**Net Worth Timeline** shows your projected portfolio value in today's dollars (inflation-adjusted) for each strategy.
+
+- **Lines** — one per strategy, using its median historical 20-year CAGR
+- **Yellow dashed line** — your FIRE number (the portfolio target)
+- **Where a line crosses the FIRE number** — your projected FIRE age for that strategy
+- **Y-axis** — real (inflation-adjusted) AUD; $1M today is shown as $1M regardless of the year
+- **Higher is faster** — strategies that reach the FIRE line sooner have stronger compounding
+
+> Projections use median historical CAGR from rolling 20-year backtest windows — not a guarantee.
+""")
 
 st.caption("All values in real (inflation-adjusted) dollars. Projections use median historical CAGR from backtest data.")
 st.warning("⚠️ This is a projection, not a guarantee. Past performance does not predict future returns.")
