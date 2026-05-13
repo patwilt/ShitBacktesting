@@ -11,9 +11,11 @@ import pandas as pd
 
 # Maps primary-asset labels in strategy names to canonical ticker strings.
 _LABEL_TO_TICKER: dict[str, str] = {
-    "SPY": "SPY", "S&P": "SPY", "S&P 500": "SPY",
-    "MSCI": "MSCI", "MSCI World": "MSCI",
-    "IVV": "IVV", "QQQ": "QQQ",
+    "SPY": "SPY",
+    "S&P": "SPY",
+    "MSCI": "MSCI",
+    "IVV": "IVV",
+    "QQQ": "QQQ",
 }
 # Secondary assets assumed in hybrid strategies (order matches percentage string).
 _HYBRID_SECONDARY = ["UPRO", "Gold"]
@@ -69,6 +71,7 @@ def load_latest_backtest_csv(search_root: str = ".") -> tuple[BacktestData, str]
         return None
 
     latest = max(candidates, key=os.path.getmtime)
+    # Column 0 is "Window_End" by convention from BacktestExporter.export_dataframe()
     df = pd.read_csv(latest, index_col=0, parse_dates=True)
 
     cagr_cols = {c: c.replace(" CAGR", "") for c in df.columns if c.endswith(" CAGR")}
