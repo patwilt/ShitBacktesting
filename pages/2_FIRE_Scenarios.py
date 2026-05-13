@@ -142,7 +142,7 @@ fig.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor=
                   yaxis=dict(tickformat="$.3s", title="Annual Amount (Real AUD)"),
                   hovermode="x unified", height=550,
                   legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 with st.expander("📖 How to read the Double Crossover chart"):
     st.markdown("""

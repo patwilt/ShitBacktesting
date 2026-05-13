@@ -112,7 +112,7 @@ fig.update_layout(
     yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Nominal AUD)"),
     height=500,
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 with st.expander("📖 How to read this chart"):
     st.markdown("""
@@ -151,6 +151,6 @@ for strat in data.strategies:
     })
 import pandas as pd
 dep_df = pd.DataFrame(strategy_dep_data).set_index("Strategy")
-st.dataframe(dep_df, use_container_width=True)
+st.dataframe(dep_df, width='stretch')
 
 st.caption("⚠️ Values in nominal AUD (inflation reduces real purchasing power). Uses median historical CAGR from backtest data.")

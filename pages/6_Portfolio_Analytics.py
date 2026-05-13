@@ -36,7 +36,7 @@ fig_bar.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgco
                       barmode="group", yaxis_title="(%)", height=400,
                       xaxis=dict(tickangle=-20),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig_bar, use_container_width=True)
+st.plotly_chart(fig_bar, width='stretch')
 
 st.subheader("Rolling CAGR Over Time")
 fig_roll = go.Figure()
@@ -51,7 +51,7 @@ fig_roll.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgc
                        xaxis=dict(title="Window End Date"),
                        yaxis=dict(tickformat=".1f", ticksuffix="%", title="20-Year CAGR"),
                        height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig_roll, use_container_width=True)
+st.plotly_chart(fig_roll, width='stretch')
 
 st.subheader("Risk-Return Scatter (Median CAGR vs Median MDD)")
 scatter_data = [{"Strategy": s, "CAGR (%)": medians_cagr[s]*100,
@@ -63,7 +63,7 @@ fig_scatter.update_traces(textposition="top center", marker_size=12)
 fig_scatter.update_layout(paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                            xaxis_title="Median Max Drawdown (%)", yaxis_title="Median CAGR (%)",
                            showlegend=False, height=400)
-st.plotly_chart(fig_scatter, use_container_width=True)
+st.plotly_chart(fig_scatter, width='stretch')
 
 with st.expander("📖 How to read these charts"):
     st.markdown("""
@@ -108,6 +108,6 @@ if strats_with_alloc:
                 showlegend=True, height=250,
                 title=dict(text=strat[:30], font_size=11),
             )
-            alloc_cols[i].plotly_chart(fig_pie, use_container_width=True)
+            alloc_cols[i].plotly_chart(fig_pie, width='stretch')
 else:
     st.info("Allocation breakdown not available for selected strategies.")

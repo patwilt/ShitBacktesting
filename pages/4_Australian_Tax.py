@@ -88,7 +88,7 @@ fig.add_vline(x=gross_income, line_dash="dash", line_color=COLORS["yellow"],
 fig.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                   xaxis_title="Annual Salary (AUD)", yaxis_title="Tax (AUD)", height=400,
                   legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 st.divider()
 st.subheader("CGT: Current vs Proposed 2027 Law")
@@ -103,7 +103,7 @@ fig2.add_trace(go.Scatter(x=gains, y=prop_cgt, name="Proposed 2027", line=dict(c
 fig2.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                    xaxis_title="Capital Gain (AUD)", yaxis_title="CGT Liability (AUD)",
                    height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig2, use_container_width=True)
+st.plotly_chart(fig2, width='stretch')
 
 if use_proposed:
     st.info("""

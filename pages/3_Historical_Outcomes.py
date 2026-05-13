@@ -30,7 +30,7 @@ rows = []
 for strat in selected:
     pcts = percentile_cagr(data.cagr_df[strat], percentiles)
     rows.append({"Strategy": strat, **{f"P{p}": f"{pcts[p]*100:.1f}%" for p in percentiles}})
-st.dataframe(pd.DataFrame(rows).set_index("Strategy"), use_container_width=True)
+st.dataframe(pd.DataFrame(rows).set_index("Strategy"), width='stretch')
 
 st.subheader("CAGR Distribution")
 fig_hist = go.Figure()
@@ -45,7 +45,7 @@ for i, strat in enumerate(selected):
 fig_hist.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                        barmode="overlay", xaxis_title="CAGR (%)", yaxis_title="# of windows",
                        height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-st.plotly_chart(fig_hist, use_container_width=True)
+st.plotly_chart(fig_hist, width='stretch')
 
 st.subheader("Probability of Beating a Return Threshold")
 threshold = st.slider("Target CAGR (%)", 0.0, 20.0, 7.0, 0.5) / 100.0
@@ -75,4 +75,4 @@ if not decade_df.empty:
                       template="plotly_dark")
     fig_heat.update_layout(paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                            yaxis_tickformat=".1%", height=400)
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width='stretch')
