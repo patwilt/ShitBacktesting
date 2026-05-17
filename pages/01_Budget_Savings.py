@@ -260,7 +260,7 @@ fig_budget.update_layout(
     xaxis_title="", yaxis_title="Monthly (AUD)",
     height=420, showlegend=False,
     xaxis=dict(tickangle=-35),
-    yaxis=dict(range=[0, net_monthly * 1.2]),
+    yaxis=dict(range=[0, max(all_values) * 1.18 if all_values else 1]),
 )
 st.plotly_chart(fig_budget, width="stretch")
 
@@ -326,15 +326,35 @@ ytf_vals = [years_to_fire(r) for r in rate_range]
 
 current_ytf = years_to_fire(savings_rate)
 
+# Plot only the savings rates where FIRE is actually reachable within the 80-year
+# horizon. Unreachable rates render as a gap (using NaN) instead of being pinned
+# to an arbitrary sentinel value that looks like real data.
+_x_pct = [r * 100 for r in rate_range]
+_y_yrs = [y if y is not None else float("nan") for y in ytf_vals]
+
 fig_fire = go.Figure()
 fig_fire.add_trace(go.Scatter(
-    x=[r * 100 for r in rate_range],
-    y=[y if y is not None else 80 for y in ytf_vals],
+    x=_x_pct, y=_y_yrs,
     mode="lines+markers",
     line=dict(color=COLORS["mint"], width=2),
     marker=dict(color=COLORS["mint"], size=6),
     name="Years to FIRE",
+    connectgaps=False,
+    hovertemplate="Save %{x:.0f}% → %{y:.0f} years<extra></extra>",
 ))
+
+# Shade the "unreachable" zone for any savings rate where the model didn't converge
+# within the planning horizon. This is much more honest than plotting 80.
+_unreachable_rates = [r * 100 for r, y in zip(rate_range, ytf_vals) if y is None]
+if _unreachable_rates:
+    fig_fire.add_vrect(
+        x0=0, x1=max(_unreachable_rates) + 2.5,
+        fillcolor=COLORS["red"], opacity=0.08, line_width=0,
+        annotation_text="FIRE not reached within 80 years",
+        annotation_position="top left",
+        annotation_font_color=COLORS["red"],
+    )
+
 if savings_rate > 0 and current_ytf is not None:
     fig_fire.add_vline(
         x=savings_rate * 100,
@@ -347,9 +367,10 @@ fig_fire.add_hline(y=25, line_dash="dot", line_color=COLORS["muted"],
 
 fig_fire.update_layout(
     **CHART_LAYOUT,
-    xaxis_title="Savings Rate (%)", yaxis_title="Years to Financial Independence",
+    xaxis_title="Savings Rate (%)",
+    yaxis_title="Years to Financial Independence",
     height=400,
-    yaxis=dict(range=[0, 60]),
+    yaxis=dict(rangemode="tozero"),
 )
 st.plotly_chart(fig_fire, width="stretch")
 
@@ -365,23 +386,32 @@ st.divider()
 # ── Wealth accumulation scenarios ─────────────────────────────────────────────
 st.subheader("Wealth Accumulation: Three Scenarios")
 
+# Floor each scenario rate at 0 — a negative savings rate would imply drawing down
+# the portfolio every year, which would otherwise plot a physically impossible
+# negative portfolio balance.
 scenario_rates = {
-    f"Current Rate ({savings_rate*100:.0f}%)":  savings_rate,
-    f"Stretch (+10%)":  min(savings_rate + 0.10, 0.95),
-    f"Optimised (+20%)": min(savings_rate + 0.20, 0.95),
+    f"Current Rate ({savings_rate*100:.0f}%)":  max(savings_rate, 0.0),
+    "Stretch (+10%)":   min(max(savings_rate + 0.10, 0.0), 0.95),
+    "Optimised (+20%)": min(max(savings_rate + 0.20, 0.0), 0.95),
 }
 scenario_colors = [COLORS["blue"], COLORS["mint"], COLORS["purple"]]
 
 fig_wealth = go.Figure()
 horizon_yrs = 30
+_depletion_notes: list[str] = []
 for (scenario_name, rate), color in zip(scenario_rates.items(), scenario_colors):
-    portfolio_traj = [existing_portfolio]
+    portfolio_traj = [float(existing_portfolio)]
     annual_inc = net_annual
     bal = float(existing_portfolio)
+    depleted_year: int | None = None
     for yr in range(1, horizon_yrs + 1):
         annual_inc *= (1 + income_growth)
         annual_save = annual_inc * rate
         bal = bal * (1 + portfolio_return) + annual_save
+        if bal <= 0 and depleted_year is None:
+            depleted_year = yr
+            bal = 0.0
+        bal = max(bal, 0.0)
         cpi = (1 + inflation_rate) ** yr
         portfolio_traj.append(bal / cpi)  # real terms
 
@@ -391,6 +421,8 @@ for (scenario_name, rate), color in zip(scenario_rates.items(), scenario_colors)
         name=scenario_name,
         line=dict(color=color, width=2),
     ))
+    if depleted_year is not None:
+        _depletion_notes.append(f"{scenario_name} depletes at year {depleted_year}")
 
 fire_real = fire_number
 fig_wealth.add_hline(
@@ -403,9 +435,18 @@ fig_wealth.update_layout(
     xaxis_title="Years from Now",
     yaxis_title="Portfolio Value (Real, Inflation-Adjusted AUD)",
     height=420,
+    yaxis=dict(rangemode="tozero"),
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
 st.plotly_chart(fig_wealth, width="stretch")
+
+if _depletion_notes:
+    st.warning(
+        "⚠️ **Portfolio depletion detected.** "
+        + " · ".join(_depletion_notes) + ". "
+        "This happens when your savings rate is at or below zero. "
+        "Restore a positive monthly surplus before projecting further."
+    )
 
 # ── Methodology ───────────────────────────────────────────────────────────────
 with st.expander("📋 Methodology & Assumptions"):

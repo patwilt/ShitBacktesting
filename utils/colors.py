@@ -1,29 +1,48 @@
-"""Flat UI Colors — US palette. All charts and UI elements use this dict exclusively."""
+"""
+Warm, muted colour palette for a calm, premium light-mode interface.
 
+webPro.md aesthetic: soft, warm, minimal. Modern beige/neutral palette.
+Avoid: saturated hues, neon tones, harsh blacks, visual noise.
+"""
+
+# ── Semantic colour palette ────────────────────────────────────────────────────
 COLORS: dict[str, str] = {
-    "mint":        "#00b894",   # Mint Leaf          — FIRE achieved / success
-    "teal":        "#00cec9",   # Robin's Egg Blue   — secondary accent
-    "blue":        "#0984e3",   # Electron Blue      — primary accent / DCA lines
-    "light_blue":  "#74b9ff",   # Green Darner Tail  — strategy 1
-    "purple":      "#6c5ce7",   # Exodus Fruit       — strategy 2 / scenarios
-    "lavender":    "#a29bfe",   # Shy Moment         — strategy 3
-    "green":       "#55efc4",   # Light Greenish Blue — growth bars
-    "cyan":        "#81ecec",   # Faded Poster       — strategy 4
-    "yellow":      "#fdcb6e",   # Sour Lemon         — salary / warning
-    "soft_yellow": "#ffeaa7",   # First Date         — DCA line
-    "orange":      "#e17055",   # Orangeville        — drawdown / risk
-    "red":         "#d63031",   # Chi-Gong           — danger / depletion
-    "pink":        "#fd79a8",   # Pink Glamour       — special highlight
-    "muted":       "#636e72",   # American River     — secondary text
-    "light_grey":  "#b2bec3",   # Soothing Breeze    — axis labels
-    "near_white":  "#dfe6e9",   # City Lights        — titles on dark bg
-    "dark":        "#2d3436",   # Dracula Orchid     — card backgrounds
+    "mint":        "#4E9A72",   # Sage green        - FIRE achieved / success
+    "teal":        "#3D8888",   # Sea green          - secondary accent
+    "blue":        "#4275A0",   # Dusty blue         - primary accent / DCA lines
+    "light_blue":  "#6A9EC0",   # Powder blue        - strategy 1
+    "purple":      "#7060A8",   # Dusty purple       - strategy 2 / scenarios
+    "lavender":    "#9080C0",   # Soft lavender      - strategy 3
+    "green":       "#5EA880",   # Muted sage         - growth bars
+    "cyan":        "#5A9EA8",   # Dusty cyan         - strategy 4
+    "yellow":      "#C08A38",   # Warm amber         - salary / warning
+    "soft_yellow": "#C8A860",   # Muted gold         - DCA line
+    "orange":      "#B86238",   # Warm terracotta    - drawdown / risk
+    "red":         "#A84848",   # Muted brick red    - danger / depletion
+    "pink":        "#B07888",   # Dusty rose         - special highlight
+    "muted":       "#8A8480",   # Stone grey         - secondary text / annotations
+    "light_grey":  "#B8B4B0",   # Warm light grey    - axis labels
+    "near_white":  "#F7F5F0",   # Warm white         - backgrounds
+    "dark":        "#2C2520",   # Warm charcoal      - text / annotations on light bg
 }
 
+# ── Strategy line colours (5 distinct warm/muted tones) ───────────────────────
 STRATEGY_COLORS: list[str] = [
-    COLORS["light_blue"],
-    COLORS["purple"],
-    COLORS["mint"],
-    COLORS["cyan"],
-    COLORS["pink"],
+    COLORS["light_blue"],   # Powder blue
+    COLORS["purple"],       # Dusty purple
+    COLORS["mint"],         # Sage green
+    COLORS["cyan"],         # Dusty cyan
+    COLORS["pink"],         # Dusty rose
 ]
+
+# ── Chart theme ────────────────────────────────────────────────────────────────
+# Spread into every fig.update_layout() call:  fig.update_layout(**CHART_LAYOUT, ...)
+CHART_BG   = "#F7F5F0"   # warm off-white, matches the app background
+CHART_TEXT = "#2C2520"   # warm charcoal, readable without harshness
+
+CHART_LAYOUT: dict = {
+    "template":      "plotly_white",
+    "paper_bgcolor": CHART_BG,
+    "plot_bgcolor":  CHART_BG,
+    "font":          {"color": CHART_TEXT, "family": "system-ui, -apple-system, sans-serif"},
+}

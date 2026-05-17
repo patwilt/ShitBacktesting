@@ -42,18 +42,29 @@ for strat in selected:
 st.dataframe(pd.DataFrame(rows).set_index("Strategy"), width='stretch')
 
 st.subheader("CAGR Distribution")
+
+# Overlay mode with translucent bars works for 1–3 strategies, but more than that
+# gets muddy and unreadable. Switch to grouped (side-by-side) bars automatically
+# when there are 4+ strategies selected.
+_use_overlay = len(selected) <= 3
+
 fig_hist = go.Figure()
 for i, strat in enumerate(selected):
     color = STRATEGY_COLORS[i % len(STRATEGY_COLORS)]
     fig_hist.add_trace(go.Histogram(
         x=data.cagr_df[strat] * 100,
-        name=strat, opacity=0.75,
+        name=strat,
+        opacity=0.75 if _use_overlay else 0.9,
         marker_color=color,
         hovertemplate="%{x:.1f}% CAGR<br>Count: %{y}<extra>" + strat + "</extra>",
     ))
-fig_hist.update_layout(**CHART_LAYOUT,
-                       barmode="overlay", xaxis_title="CAGR (%)", yaxis_title="# of windows",
-                       height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+fig_hist.update_layout(
+    **CHART_LAYOUT,
+    barmode="overlay" if _use_overlay else "group",
+    xaxis_title="CAGR (%)", yaxis_title="# of windows",
+    height=400,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+)
 st.plotly_chart(fig_hist, width='stretch')
 
 st.subheader("Probability of Beating a Return Threshold")

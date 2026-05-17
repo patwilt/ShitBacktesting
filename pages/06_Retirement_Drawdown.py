@@ -98,10 +98,15 @@ for y in range(max_years + 1):
     balance = balance * (1.0 + real_r_plot) - annual_withdrawal
 
 fig = go.Figure()
-balance_color = [
-    COLORS["red"] if v <= portfolio * 0.25 else (
-        COLORS["orange"] if v <= portfolio * 0.50 else COLORS["mint"]
-    ) for v in values_plot
+
+# Per-year zone markers: green when balance is healthy, amber as the buffer
+# erodes, red once it drops below 25% of the starting portfolio. This gives a
+# subtle visual signal of risk along the line without needing a second axis.
+zone_color = [
+    COLORS["red"]    if v <= portfolio * 0.25
+    else COLORS["orange"] if v <= portfolio * 0.50
+    else COLORS["mint"]
+    for v in values_plot
 ]
 
 fig.add_trace(go.Scatter(
@@ -109,6 +114,7 @@ fig.add_trace(go.Scatter(
     mode="lines+markers",
     name="Portfolio Balance",
     line=dict(color=COLORS["blue"], width=3),
+    marker=dict(color=zone_color, size=7, line=dict(width=0)),
     fill="tozeroy",
     fillcolor="rgba(66, 117, 160, 0.15)",
     hovertemplate="Year %{x}<br>Balance: $%{y:,.0f}<extra></extra>",

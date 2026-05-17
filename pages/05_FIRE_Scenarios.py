@@ -1,5 +1,6 @@
 """FIRE Scenarios — Coast/Lean/Fat/Barista crossover analysis."""
 from __future__ import annotations
+import math
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -180,17 +181,34 @@ for i, strat in enumerate(selected):
                               hovertemplate=f"{strat}: $%{{y:,.0f}}<extra></extra>"))
     dca_yr = dca_crossover_year(proj_df, strat)
     sal_yr = salary_crossover_year(proj_df, strat)
-    ay_offset = -40 - i * 25
+
+    # Stagger annotation offsets per strategy so multiple crossovers in the same
+    # area don't collide. Alternate side and step the vertical offset.
+    side    = -1 if (i % 2 == 0) else 1
+    ax_step = side * (40 + (i // 2) * 30)
+    ay_step = -60 - (i // 2) * 35
+
+    # Anchor each annotation to the profit line (which is what the crossover is
+    # actually about), not the DCA/Salary line — that way the arrow points at
+    # the strategy's curve regardless of whether DCA stops at coast.
     if dca_yr and dca_yr < len(proj_df):
-        fig.add_annotation(x=dca_yr + current_age, y=float(proj_df["Yearly_DCA"].iloc[dca_yr]),
-                           text=f"Coast {strat[:8]} yr {dca_yr}", showarrow=True, arrowhead=2,
-                           ax=-40, ay=ay_offset,
-                           bgcolor=COLORS["blue"], font=dict(color=COLORS["dark"], size=10))
+        fig.add_annotation(
+            x=dca_yr + current_age,
+            y=float(profit.iloc[dca_yr]),
+            text=f"Coast {strat[:8]} yr {dca_yr}",
+            showarrow=True, arrowhead=2,
+            ax=-abs(ax_step), ay=ay_step,
+            bgcolor=COLORS["blue"], font=dict(color=COLORS["dark"], size=10),
+        )
     if sal_yr and sal_yr < len(proj_df):
-        fig.add_annotation(x=sal_yr + current_age, y=float(proj_df["Salary"].iloc[sal_yr]),
-                           text=f"FI {strat[:8]} yr {sal_yr}", showarrow=True, arrowhead=1,
-                           ax=40, ay=ay_offset,
-                           bgcolor=color, font=dict(color=COLORS["dark"], size=10))
+        fig.add_annotation(
+            x=sal_yr + current_age,
+            y=float(profit.iloc[sal_yr]),
+            text=f"FI {strat[:8]} yr {sal_yr}",
+            showarrow=True, arrowhead=1,
+            ax=abs(ax_step), ay=ay_step,
+            bgcolor=color, font=dict(color=COLORS["dark"], size=10),
+        )
 
 # Super preservation age vertical line
 if pres_age <= current_age + horizon_years:
@@ -377,6 +395,47 @@ def _sim_buckets(
                 ns  = max(ns, 0.0) * (1.0 + real_port_r) - leftover
     return ns_out, sup_out
 
+
+# ── Helper: robust max-withdrawal binary search ──────────────────────────────
+def _solve_max_withdrawal(
+    end_balance_fn,
+    initial_hi: float,
+    *,
+    max_hi: float = 1e12,
+    iterations: int = 60,
+) -> float:
+    """
+    Find the maximum withdrawal w such that end_balance_fn(w) >= 0.
+
+    Uses doubling-then-binary-search so the answer is correct even when the
+    caller's initial upper bound isn't large enough to actually bankrupt the
+    bucket. A fixed upper bound under-spends silently; this helper guarantees
+    the search interval brackets the root.
+
+    Args:
+        end_balance_fn: callable f(w) -> final balance (positive means w too low,
+                        negative means w too high).
+        initial_hi:     starting guess for the upper bound; will be doubled
+                        until the bucket actually bankrupts.
+        max_hi:         safety ceiling to prevent infinite expansion.
+        iterations:     bisection rounds (60 gives ~1e-18 relative precision).
+    """
+    # If even no withdrawal leaves a deficit, the bucket can't sustain anything.
+    if end_balance_fn(0.0) < 0:
+        return 0.0
+    lo = 0.0
+    hi = max(float(initial_hi), 1.0)
+    while end_balance_fn(hi) > 0 and hi < max_hi:
+        hi *= 2.0
+    for _ in range(iterations):
+        mid = (lo + hi) / 2.0
+        if end_balance_fn(mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 # Strategy A: SWR - draw SWR% of super post-preservation; non-super compounds
 swr_post_w = (
     max(
@@ -426,15 +485,13 @@ def _end_total(w0: float) -> float:
                 sup = 0.0
     return ns + sup
 
-# Bracket: lo leaves money on table; hi bankrupts before sim_end_age
-_lo_b, _hi_b = float(bridge_withdrawal) * 0.5, (non_super_at_fire + super_at_fire) * 0.3
-for _ in range(80):
-    _mid = (_lo_b + _hi_b) / 2.0
-    if _end_total(_mid) > 0:
-        _lo_b = _mid
-    else:
-        _hi_b = _mid
-deplete_both_w = (_lo_b + _hi_b) / 2.0
+# Solve for the constant real withdrawal that depletes the combined bucket by
+# sim_end_age. Doubling search guarantees the bracket actually contains the root
+# even for short sim windows or fat-FIRE starting balances.
+deplete_both_w = _solve_max_withdrawal(
+    _end_total,
+    initial_hi=(non_super_at_fire + super_at_fire) * 0.3,
+)
 
 ns_B, sup_B = _sim_buckets(non_super_at_fire, super_at_fire, deplete_both_w, deplete_both_w)
 
@@ -490,14 +547,10 @@ if bridge_years_C > 0:
         for _age in range(fire_age_C_start, pres_age):
             ns = max(ns, 0.0) * (1.0 + real_port_r) - w0
         return ns
-    _lo_c, _hi_c = 0.0, non_super_at_fire_C * 2.0
-    for _ in range(80):
-        _mid_c = (_lo_c + _hi_c) / 2.0
-        if _ns_at_pres_bridge_C(_mid_c) > 0:
-            _lo_c = _mid_c
-        else:
-            _hi_c = _mid_c
-    strat_C_bridge_w = (_lo_c + _hi_c) / 2.0
+    strat_C_bridge_w = _solve_max_withdrawal(
+        _ns_at_pres_bridge_C,
+        initial_hi=non_super_at_fire_C,
+    )
 else:
     strat_C_bridge_w = swr_post_w
 
@@ -514,14 +567,10 @@ def _sup_end_C(w_post: float) -> float:
         sup = max(sup, 0.0) * (1.0 + real_sup_r) - w_post
     return sup
 
-_lo_cp, _hi_cp = 0.0, max(super_at_pres_C * 0.5, 1.0)
-for _ in range(80):
-    _mid_cp = (_lo_cp + _hi_cp) / 2.0
-    if _sup_end_C(_mid_cp) > 0:
-        _lo_cp = _mid_cp
-    else:
-        _hi_cp = _mid_cp
-strat_C_post_w = (_lo_cp + _hi_cp) / 2.0
+strat_C_post_w = _solve_max_withdrawal(
+    _sup_end_C,
+    initial_hi=max(super_at_pres_C * 0.5, 1.0),
+)
 
 # Simulate C over sim_ages_C (may start earlier than fire_age_target)
 def _sim_C(ns0: float, sup0: float, w_bridge: float, w_post: float) -> tuple[list[float], list[float]]:
@@ -612,6 +661,18 @@ mc3.metric(
 # Log scale can't plot 0, clamp depleted values to $1 so the line stays visible.
 _log_floor = lambda vals: [max(v, 1.0) for v in vals]
 
+# Compute a data-driven log y-axis range so we don't silently clip portfolios that
+# sit below $100k or grow above $10M. We anchor the lower bound at $1,000 so a
+# depleting line drops clearly through visible territory before vanishing.
+_all_bucket_vals = [v for v in (ns_A + total_A + total_B + ns_C + total_C) if v > 0]
+if _all_bucket_vals:
+    _data_min = max(min(_all_bucket_vals), 1.0)
+    _data_max = max(_all_bucket_vals)
+    _y_log_lo = math.log10(max(min(_data_min, 1_000.0), 1.0))
+    _y_log_hi = math.log10(_data_max * 1.25)
+else:
+    _y_log_lo, _y_log_hi = 3.0, 7.0
+
 fig_buckets = go.Figure()
 
 fig_buckets.add_trace(go.Scatter(
@@ -696,7 +757,7 @@ fig_buckets.update_layout(
     xaxis=dict(title="Age", dtick=5),
     yaxis=dict(
         type="log",
-        range=[5, 7],          # log10(100k)=5, log10(10M)=7
+        range=[_y_log_lo, _y_log_hi],
         tickformat="$.3s",
         title="Portfolio Balance (Real AUD, log scale)",
     ),

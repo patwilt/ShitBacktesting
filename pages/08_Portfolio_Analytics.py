@@ -40,17 +40,34 @@ st.subheader("Median CAGR vs Max Drawdown")
 medians_cagr = {s: float(data.cagr_df[s].median()) for s in selected}
 medians_mdd  = {s: float(data.mdd_df[s].median()) for s in selected if s in data.mdd_df.columns}
 
+# Max Drawdown is a loss, conventionally negative. We plot |MDD| for visual
+# size against CAGR, but make the sign explicit in the legend and hover so it
+# is never mistaken for a positive return.
+_cagr_pct = [medians_cagr[s] * 100 for s in selected]
+_mdd_pct  = [abs(medians_mdd.get(s, 0)) * 100 for s in selected]
+
 fig_bar = go.Figure()
-fig_bar.add_trace(go.Bar(x=selected, y=[medians_cagr[s]*100 for s in selected],
-                          name="Median CAGR (%)", marker_color=COLORS["mint"],
-                          hovertemplate="%{x}<br>CAGR: %{y:.1f}%<extra></extra>"))
-fig_bar.add_trace(go.Bar(x=selected, y=[abs(medians_mdd.get(s, 0))*100 for s in selected],
-                          name="Median MDD (%)", marker_color=COLORS["orange"],
-                          hovertemplate="%{x}<br>MDD: %{y:.1f}%<extra></extra>"))
-fig_bar.update_layout(**CHART_LAYOUT,
-                      barmode="group", yaxis_title="(%)", height=400,
-                      xaxis=dict(tickangle=-20),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+fig_bar.add_trace(go.Bar(
+    x=selected, y=_cagr_pct,
+    name="Median CAGR (%)", marker_color=COLORS["mint"],
+    hovertemplate="%{x}<br>CAGR: %{y:.1f}%<extra></extra>",
+))
+fig_bar.add_trace(go.Bar(
+    x=selected, y=_mdd_pct,
+    name="Median Max Drawdown (shown as magnitude)",
+    marker_color=COLORS["orange"],
+    text=[f"-{v:.1f}%" for v in _mdd_pct],
+    textposition="outside",
+    hovertemplate="%{x}<br>Max Drawdown: -%{y:.1f}%<extra></extra>",
+))
+fig_bar.update_layout(
+    **CHART_LAYOUT,
+    barmode="group",
+    yaxis_title="CAGR (+) and |Max Drawdown| (−) shown as magnitude",
+    height=400,
+    xaxis=dict(tickangle=-20),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+)
 st.plotly_chart(fig_bar, width='stretch')
 
 st.subheader("Rolling CAGR Over Time")
