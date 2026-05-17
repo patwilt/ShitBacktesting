@@ -95,28 +95,30 @@ with st.sidebar:
 
     st.divider()
     st.header("📈 Salary Growth")
+    st.caption("Pre-filled from your profile. Set it once on the Home page and it flows everywhere.")
+    _sg_default = float(profile.get("pf_salary_growth") or 3.0)
     salary_growth_rate = st.slider(
-        "Annual Salary Growth (%/yr)", 0.0, 8.0, 3.0, 0.25,
+        "Annual Salary Growth (%/yr)", 0.0, 8.0,
+        min(8.0, max(0.0, _sg_default)), 0.25,
         help="How fast your gross income grows each year (nominal). "
-             "Australian wages have historically grown ~3–4%/yr. "
-             "Set to 0 to model a flat salary.",
+             "Set once on the Home page; overridable locally here.",
     ) / 100.0
+    _pf_ceiling = profile.get("pf_salary_ceiling")
     _show_ceiling = st.toggle(
-        "Advanced: Set Salary Ceiling", value=False,
+        "Advanced: Set Salary Ceiling", value=_pf_ceiling is not None,
         help="Define a maximum salary in today's purchasing power. "
-             "Useful if you expect to plateau at a certain income level.",
+             "Pre-filled from the Home page ceiling if set.",
     )
     salary_ceiling_today: float | None = None
     if _show_ceiling:
-        _ceil_default = int(max(gross_income * 2, gross_income + 50_000))
+        _ceil_default = int(_pf_ceiling) if _pf_ceiling is not None else int(max(gross_income * 2, gross_income + 50_000))
         salary_ceiling_today = float(st.number_input(
             "Salary Ceiling (Today's Dollars, AUD)",
             min_value=int(gross_income) if gross_income > 0 else 0,
             value=_ceil_default,
             step=10_000,
             help="Maximum salary in today's purchasing power. "
-                 "Automatically indexed to inflation each year so the nominal ceiling "
-                 "keeps pace with the cost of living.",
+                 "Automatically indexed to inflation each year.",
         ))
 
     st.divider()

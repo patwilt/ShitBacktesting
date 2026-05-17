@@ -74,7 +74,12 @@ with st.sidebar:
         "Non-Concessional Contributions ($)", min_value=0, value=0, step=1_000,
         help=f"After-tax contributions. Capped at ${NON_CONC_CAP:,}/yr (2024-25)."
     )
-    income_growth_rate = st.slider("Annual Income Growth (%)", 0.0, 10.0, 3.0, 0.25) / 100.0
+    _default_income_growth = float(profile.get("pf_salary_growth") or 3.0)
+    income_growth_rate = st.slider(
+        "Annual Income Growth (%)", 0.0, 10.0,
+        min(10.0, max(0.0, _default_income_growth)), 0.25,
+        help="Pre-filled from your profile salary growth setting.",
+    ) / 100.0
 
     st.divider()
     st.header("📈 Investment Returns")

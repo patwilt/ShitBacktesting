@@ -20,10 +20,11 @@ profile.init()
 st.title("🎯 FIRE Scenarios")
 st.caption("Step 6 of your journey: model different paths to financial independence. Compare strategies, DCA rates, and FIRE timelines side by side.")
 
-_pf_monthly_savings = profile.get("pf_monthly_savings")
-_pf_annual_spending = profile.get("pf_annual_spending")
-_default_dca        = int(_pf_monthly_savings) if _pf_monthly_savings is not None else 1_500
-_default_spending   = int(_pf_annual_spending) if _pf_annual_spending is not None else 80_000
+_pf_monthly_savings  = profile.get("pf_monthly_savings")
+_pf_annual_spending  = profile.get("pf_annual_spending")
+_default_dca         = int(_pf_monthly_savings) if _pf_monthly_savings is not None else 1_500
+_default_spending    = int(_pf_annual_spending) if _pf_annual_spending is not None else 80_000
+_default_salary_growth = float(profile.get("pf_salary_growth") or 3.0)
 
 # When partnered, default the salary input to the household total so DCA-as-%
 # and salary-crossover projections match real household earnings. The user can
@@ -45,7 +46,9 @@ with st.sidebar:
                                           "Tax in this projection is approximated; for accurate "
                                           "per-partner tax breakdown see the Budget page.") if _partnered
                                     else "Pre-filled from your profile.")
-    salary_growth = st.number_input("Salary Growth (%/yr)", min_value=0.0, value=3.0, step=0.5)
+    salary_growth = st.number_input("Salary Growth (%/yr)", min_value=0.0,
+                                    value=_default_salary_growth, step=0.5,
+                                    help="Pre-filled from your profile. Set it once on the Home page.")
     portfolio     = st.number_input("Starting Portfolio", min_value=0, step=5_000, value=profile.get("pf_portfolio"))
     dca_method    = st.radio("DCA Method", ["Fixed Monthly Amount", "Percentage of Salary"])
     if dca_method == "Fixed Monthly Amount":

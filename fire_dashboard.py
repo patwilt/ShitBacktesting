@@ -206,6 +206,33 @@ _inflation     = r3c2.number_input("Inflation (%/yr)",        min_value=0.0, max
 _port_return   = r3c3.number_input("Portfolio Return (%/yr)", min_value=0.0, max_value=25.0, step=0.25, format="%.2f", value=profile.get("pf_portfolio_return"))
 _swr           = r3c4.number_input("Safe Withdrawal Rate (%)", min_value=1.0, max_value=10.0, step=0.25, format="%.2f", value=profile.get("pf_swr"))
 
+st.divider()
+st.markdown("**📈 Salary Growth**")
+r4c1, r4c2, r4c3 = st.columns([1, 1, 2])
+_salary_growth = r4c1.number_input(
+    "Annual Salary Growth (%/yr)", min_value=0.0, max_value=15.0, step=0.25, format="%.2f",
+    value=float(profile.get("pf_salary_growth")),
+    help="How fast your gross income grows each year (nominal). "
+         "~3–4%/yr is typical for Australia. Used by the Home Deposit, Super, and FIRE pages.",
+)
+_show_ceiling = r4c2.toggle(
+    "Set salary ceiling",
+    value=profile.get("pf_salary_ceiling") is not None,
+    help="Optionally cap the salary at a maximum in today's purchasing power. "
+         "Useful if you expect your income to plateau at a certain level.",
+)
+_salary_ceiling: float | None = None
+if _show_ceiling:
+    _ceil_default = int(profile.get("pf_salary_ceiling") or max(int(_gross) * 2, int(_gross) + 50_000))
+    _salary_ceiling = float(r4c3.number_input(
+        "Salary Ceiling (Today's Dollars, AUD)",
+        min_value=0, step=10_000,
+        value=_ceil_default,
+        help="Maximum salary in today's purchasing power. "
+             "Indexed to inflation each year — e.g. at 2.5% inflation, a $200k ceiling "
+             "becomes $205k nominal next year.",
+    ))
+
 st.caption(
     "💡 Fill in your numbers, then click **Save Profile** — every calculator page will be pre-filled instantly."
 )
@@ -227,6 +254,8 @@ with btn_col:
         profile.set_value("pf_inflation",             float(_inflation))
         profile.set_value("pf_portfolio_return",      float(_port_return))
         profile.set_value("pf_swr",                   float(_swr))
+        profile.set_value("pf_salary_growth",         float(_salary_growth))
+        profile.set_value("pf_salary_ceiling",        _salary_ceiling)
         if _partnered:
             profile.set_value("pf_partner_age",           int(_p_age))
             profile.set_value("pf_partner_gross_income",  int(_p_gross))

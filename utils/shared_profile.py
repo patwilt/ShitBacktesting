@@ -42,6 +42,8 @@ PROFILE_DEFAULTS: dict[str, object] = {
     "pf_inflation":        2.5,      # % per year
     "pf_portfolio_return": 7.0,      # % per year, nominal
     "pf_swr":              4.0,      # % safe withdrawal rate
+    "pf_salary_growth":    3.0,      # % per year, nominal salary growth rate
+    "pf_salary_ceiling":   None,     # max salary in today's $; None = no cap
     # Calculated outputs (set by calculator pages)
     "pf_monthly_savings":  None,     # set by Budget page
     "pf_annual_spending":  None,     # set by Budget page
