@@ -25,24 +25,48 @@ st.caption(
 CONCESSIONAL_CAP = 30_000     # 2024-25 cap (employer SG + salary sacrifice)
 NON_CONC_CAP     = 110_000    # 2024-25 non-concessional cap
 
+_partnered = profile.is_partnered()
+
 # ── Sidebar inputs ────────────────────────────────────────────────────────────
 with st.sidebar:
     profile.sidebar_summary()
+
+    # When partnered, let the user pick which partner's super to model. Australian
+    # super accounts are individual, so each has its own balance, salary, and SG.
+    if _partnered:
+        st.header("👥 Person")
+        person = st.radio(
+            "Whose super to model?",
+            ["You", "Partner"],
+            horizontal=True,
+            help="Australian super accounts are individual. Switch to project each "
+                 "partner's balance separately. Combined household super shows in the sidebar.",
+        )
+    else:
+        person = "You"
+
+    _is_you = (person == "You")
+    _key_age           = "pf_age"            if _is_you else "pf_partner_age"
+    _key_super         = "pf_super_balance"  if _is_you else "pf_partner_super_balance"
+    _key_gross         = "pf_gross_income"   if _is_you else "pf_partner_gross_income"
+    _label_super       = "Your Current Balance ($)" if _is_you else "Partner's Current Balance ($)"
+    _label_gross       = "Your Gross Income ($)"    if _is_you else "Partner's Gross Income ($)"
+
     st.header("👤 Personal Details")
-    st.caption("Pre-filled from your profile.")
-    current_age        = st.slider("Current Age",    18, 65, min(max(profile.get("pf_age"), 18), 65))
+    st.caption(f"Pre-filled from your profile ({person.lower()}).")
+    current_age        = st.slider("Current Age",    18, 65, min(max(profile.get(_key_age), 18), 65))
     retirement_age     = st.slider("Retirement Age", 50, 75, min(max(profile.get("pf_retirement_age"), 50), 75))
     years_to_retire    = max(retirement_age - current_age, 1)
 
     st.divider()
     st.header("💰 Current Super")
-    current_super      = st.number_input("Current Balance ($)", min_value=0,
-                                         value=profile.get("pf_super_balance"), step=5_000)
+    current_super      = st.number_input(_label_super, min_value=0,
+                                         value=profile.get(_key_super), step=5_000)
 
     st.divider()
     st.header("💼 Income & Contributions")
-    gross_income       = st.number_input("Gross Income ($)", min_value=0,
-                                         value=profile.get("pf_gross_income"), step=5_000)
+    gross_income       = st.number_input(_label_gross, min_value=0,
+                                         value=profile.get(_key_gross), step=5_000)
     sg_rate            = st.slider("Employer SG Rate (%)", 9.0, 12.0, 11.5, 0.25) / 100.0
     salary_sacrifice   = st.number_input(
         "Salary Sacrifice ($)", min_value=0, value=5_000, step=500,
@@ -166,14 +190,17 @@ final_sg   = real_sg[-1]
 exp_l, exp_r = st.columns([3, 1])
 with exp_l:
     st.info(
-        f"**Current super:** ${current_super:,.0f}  ·  "
+        f"**{person}'s super:** ${current_super:,.0f}  ·  "
         f"**Projected at {retirement_age} (real $):** ${final_base:,.0f} (current plan)"
     )
 with exp_r:
+    # Push the balance back to the right partner's profile slot.
+    super_export = {_key_super: current_super, _key_gross: gross_income}
     profile.export_button(
-        "Export Super Balance to Profile",
-        {"pf_super_balance": current_super},
-        help="Updates the shared profile super balance so Dashboard and FIRE pages use it.",
+        f"Export {person}'s Super to Profile",
+        super_export,
+        help=f"Updates the shared profile {person.lower()}'s super balance and gross "
+             "income so Dashboard, Net Wealth, and FIRE pages stay in sync.",
     )
 
 m1, m2, m3 = st.columns(3)

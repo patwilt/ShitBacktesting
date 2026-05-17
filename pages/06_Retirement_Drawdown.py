@@ -13,9 +13,18 @@ profile.init()
 st.title("💸 Retirement Drawdown")
 st.caption("Step 6 of your journey: stress-test your retirement income. Model safe withdrawal rates, inflation, and portfolio depletion risk.")
 
-# Compute a default retirement portfolio: profile portfolio + super (rough at-retirement estimate)
-_pf_net_worth   = profile.get("pf_net_worth")
-_default_portf  = int(_pf_net_worth) if _pf_net_worth is not None else 1_500_000
+# Default portfolio defaults to household net worth when available; otherwise
+# fall back to (portfolio + household super) so couples don't see a tiny solo
+# default that ignores their partner's super.
+_partnered     = profile.is_partnered()
+_pf_net_worth  = profile.get("pf_net_worth")
+if _pf_net_worth is not None:
+    _default_portf = int(_pf_net_worth)
+else:
+    _default_portf = int((profile.get("pf_portfolio") or 0)
+                         + profile.household_super_balance())
+    if _default_portf <= 0:
+        _default_portf = 1_500_000
 _pf_asp         = profile.get("pf_annual_spending")
 _default_withdraw = int(_pf_asp) if _pf_asp is not None else 80_000
 
@@ -23,6 +32,8 @@ with st.sidebar:
     profile.sidebar_summary()
     if profile.is_set():
         st.caption("✅ Pre-filled from profile. Adjust locally here.")
+        if _partnered:
+            st.caption("👥 Couple mode: portfolio default includes household super.")
     st.header("💰 Portfolio")
     portfolio       = st.number_input("Retirement Portfolio (AUD)", min_value=0,
                                       value=_default_portf, step=50_000)

@@ -1,8 +1,18 @@
 """
 Shared Financial Profile — persists key inputs across all pages via session state.
 
-Pages READ from this profile so users only enter core details once.
-Calculator pages WRITE back their key outputs (monthly savings, net worth, etc.).
+Design contract:
+  • The home page binds its widgets DIRECTLY to ``pf_*`` session keys, so every
+    field on every page reads the latest value via ``profile.get(key)``.
+  • Calculator pages READ from the profile to pre-fill their local widgets.
+    Local edits stay local until the user clicks an "Export to Profile" button.
+  • Export buttons MUST push back every field they collect from the user. If a
+    page shows partner inputs, it must export the partner fields too — otherwise
+    cross-page changes silently get dropped.
+
+Australian income tax is calculated per individual, so partner fields are
+tracked separately. Wealth fields that are not tax-affected (portfolio,
+property, etc.) stay joint at the household level for simplicity.
 """
 from __future__ import annotations
 
@@ -20,7 +30,7 @@ PROFILE_DEFAULTS: dict[str, object] = {
     "pf_private_cover":    False,
     # Wealth (household-level, kept joint for simplicity)
     "pf_portfolio":        40_000,   # investable assets, excl. super and property
-    "pf_super_balance":    75_000,
+    "pf_super_balance":    75_000,   # YOUR super only when partnered (see helpers)
     # Partner (Australian tax is individual, so partner fields are tracked separately)
     "pf_partner_enabled":          False,
     "pf_partner_age":              30,
@@ -68,6 +78,7 @@ def is_partnered() -> bool:
     return bool(st.session_state.get("pf_partner_enabled", False))
 
 
+# ── Household aggregations ────────────────────────────────────────────────────
 def household_gross_income() -> int:
     """Combined annual gross income across both partners (if enabled)."""
     init()
@@ -86,6 +97,15 @@ def household_super_balance() -> int:
     return total
 
 
+def household_hecs_balance() -> int:
+    """Combined HECS-HELP balance across both partners (if enabled)."""
+    init()
+    total = int(get("pf_hecs_balance") or 0)
+    if is_partnered():
+        total += int(get("pf_partner_hecs_balance") or 0)
+    return total
+
+
 # ── Sidebar summary widget ─────────────────────────────────────────────────────
 def sidebar_summary() -> None:
     """Render a compact read-only profile card in the sidebar."""
@@ -94,20 +114,25 @@ def sidebar_summary() -> None:
     title = "🔗 Household Profile" if partnered else "🔗 Your Financial Profile"
     with st.sidebar.expander(title, expanded=False):
         st.caption("Set on the home page. Pre-fills all calculators.")
+
         c1, c2 = st.columns(2)
-        c1.metric("Age",        get("pf_age"))
-        c2.metric("Retire At",  get("pf_retirement_age"))
+        c1.metric("Age",       get("pf_age"))
+        c2.metric("Retire At", get("pf_retirement_age"))
+
         income_label = "Household Income" if partnered else "Income"
         c1.metric(income_label, f"${household_gross_income():,.0f}")
         c2.metric("Portfolio",  f"${get('pf_portfolio'):,.0f}")
+
         super_label = "Household Super" if partnered else "Super"
-        c1.metric(super_label,  f"${household_super_balance():,.0f}")
-        c2.metric("Inflation",  f"{get('pf_inflation'):.1f}%")
+        c1.metric(super_label, f"${household_super_balance():,.0f}")
+        c2.metric("Inflation", f"{get('pf_inflation'):.1f}%")
 
         if partnered:
             st.caption(
-                f"You: ${get('pf_gross_income'):,.0f}  ·  "
-                f"Partner: ${get('pf_partner_gross_income'):,.0f}"
+                f"🧑 You: ${get('pf_gross_income'):,.0f} income · "
+                f"${get('pf_super_balance'):,.0f} super  \n"
+                f"🧑‍🤝‍🧑 Partner: ${get('pf_partner_gross_income'):,.0f} income · "
+                f"${get('pf_partner_super_balance'):,.0f} super"
             )
 
         ms  = get("pf_monthly_savings")
@@ -132,6 +157,10 @@ def export_button(label: str, values: dict[str, object], help: str = "") -> bool
     """
     Render an 'Export to Profile' button. On click, writes all key-value pairs
     to session state and returns True.
+
+    Pages with partner inputs MUST include partner keys in ``values`` whenever
+    partner mode is active, otherwise partner edits made on the page silently
+    fail to round-trip back to the profile.
     """
     clicked = st.button(f"📤 {label}", help=help or "Send these values to your shared profile.")
     if clicked:

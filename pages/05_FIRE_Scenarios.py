@@ -25,6 +25,13 @@ _pf_annual_spending = profile.get("pf_annual_spending")
 _default_dca        = int(_pf_monthly_savings) if _pf_monthly_savings is not None else 1_500
 _default_spending   = int(_pf_annual_spending) if _pf_annual_spending is not None else 80_000
 
+# When partnered, default the salary input to the household total so DCA-as-%
+# and salary-crossover projections match real household earnings. The user can
+# still override locally without touching the profile.
+_partnered      = profile.is_partnered()
+_default_salary = profile.household_gross_income() if _partnered else profile.get("pf_gross_income")
+_default_super  = profile.household_super_balance() if _partnered else profile.get("pf_super_balance")
+
 with st.sidebar:
     profile.sidebar_summary()
     if profile.is_set():
@@ -32,8 +39,13 @@ with st.sidebar:
     st.header("💰 Inputs")
     current_age   = st.number_input("Current Age",            min_value=18, max_value=80,
                                     value=profile.get("pf_age"))
-    salary        = st.number_input("Annual Salary (AUD)",    min_value=0,
-                                    value=profile.get("pf_gross_income"), step=5_000)
+    salary_label  = "Household Salary (AUD)" if _partnered else "Annual Salary (AUD)"
+    salary        = st.number_input(salary_label,             min_value=0,
+                                    value=int(_default_salary), step=5_000,
+                                    help=("Combined household gross income (you + partner). "
+                                          "Tax in this projection is approximated; for accurate "
+                                          "per-partner tax breakdown see the Budget page.") if _partnered
+                                    else "Pre-filled from your profile.")
     salary_growth = st.number_input("Salary Growth (%/yr)",   min_value=0.0, value=3.0, step=0.5)
     portfolio     = st.number_input("Starting Portfolio",     min_value=0,
                                     value=profile.get("pf_portfolio"), step=5_000)
@@ -67,8 +79,13 @@ with st.sidebar:
         min_value=55, max_value=75, value=_default_pres, step=1,
         help=f"Auto-set to {_default_pres} from your birth year. Override here if the law changes.",
     )
-    super_balance = st.number_input("Current Super Balance (AUD)", min_value=0,
-                                    value=profile.get("pf_super_balance"), step=5_000)
+    super_label   = "Household Super Balance (AUD)" if _partnered else "Current Super Balance (AUD)"
+    super_balance = st.number_input(super_label, min_value=0,
+                                    value=int(_default_super), step=5_000,
+                                    help=("Combined super across both partners. Australian super "
+                                          "accounts are individual but for FIRE planning the "
+                                          "household total drives the bridge-period maths.") if _partnered
+                                    else None)
     super_return  = st.slider("Super Annual Return (%, nominal)", 3.0, 12.0, 7.0, 0.5,
                               help="Nominal return before inflation. App converts to real return internally.")
     sgc_rate      = st.slider(

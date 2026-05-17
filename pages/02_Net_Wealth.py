@@ -19,17 +19,31 @@ st.caption(
     "30-year projections show where you're headed in real (inflation-adjusted) terms."
 )
 
+_partnered = profile.is_partnered()
+
 # ── Input columns ─────────────────────────────────────────────────────────────
 col_assets, col_liab = st.columns(2)
 
 with col_assets:
     st.subheader("Assets")
+    if _partnered:
+        st.caption(
+            "👥 Couple mode: super is tracked per-partner (Australian super accounts "
+            "are individual). Other assets are joint household figures."
+        )
     with st.expander("Cash & Liquid", expanded=True):
         cash_savings     = st.number_input("Cash / Savings Account ($)", min_value=0, value=25_000,  step=1_000)
         emergency_fund   = st.number_input("Emergency Fund ($)",          min_value=0, value=15_000,  step=1_000)
         term_deposits    = st.number_input("Term Deposits ($)",           min_value=0, value=0,       step=1_000)
     with st.expander("Investments", expanded=True):
-        super_balance    = st.number_input("Superannuation ($)",          min_value=0, value=profile.get("pf_super_balance"), step=5_000)
+        if _partnered:
+            sc1, sc2 = st.columns(2)
+            your_super_balance    = sc1.number_input("Your Super ($)",    min_value=0, value=profile.get("pf_super_balance"),         step=5_000)
+            partner_super_balance = sc2.number_input("Partner Super ($)", min_value=0, value=profile.get("pf_partner_super_balance"), step=5_000)
+            super_balance = your_super_balance + partner_super_balance
+        else:
+            super_balance = st.number_input("Superannuation ($)", min_value=0, value=profile.get("pf_super_balance"), step=5_000)
+            your_super_balance, partner_super_balance = super_balance, 0
         shares_etfs      = st.number_input("Shares / ETFs ($)",           min_value=0, value=profile.get("pf_portfolio"),      step=5_000)
         crypto           = st.number_input("Crypto / Other Digital ($)",  min_value=0, value=5_000,   step=1_000)
         business         = st.number_input("Business Interests ($)",      min_value=0, value=0,       step=5_000)
@@ -306,20 +320,31 @@ st.caption(
 exp_col1, exp_col2 = st.columns([2, 1])
 invest_assets = shares_etfs + crypto + business
 with exp_col1:
-    st.info(
-        f"**Net Worth:** ${net_worth:,.0f}  ·  "
-        f"**Investment Portfolio (shares+ETFs):** ${invest_assets:,.0f}  ·  "
-        f"**Super:** ${super_balance:,.0f}"
-    )
+    if _partnered:
+        st.info(
+            f"**Net Worth:** ${net_worth:,.0f}  ·  "
+            f"**Portfolio (shares+ETFs):** ${invest_assets:,.0f}  ·  "
+            f"**Super (you / partner):** ${your_super_balance:,.0f} / ${partner_super_balance:,.0f}"
+        )
+    else:
+        st.info(
+            f"**Net Worth:** ${net_worth:,.0f}  ·  "
+            f"**Investment Portfolio (shares+ETFs):** ${invest_assets:,.0f}  ·  "
+            f"**Super:** ${super_balance:,.0f}"
+        )
 with exp_col2:
+    nw_export: dict[str, object] = {
+        "pf_net_worth":     net_worth,
+        "pf_portfolio":     invest_assets,
+        "pf_super_balance": your_super_balance,
+    }
+    if _partnered:
+        nw_export["pf_partner_super_balance"] = partner_super_balance
     profile.export_button(
         "Export Net Worth & Portfolio to Profile",
-        {
-            "pf_net_worth":    net_worth,
-            "pf_portfolio":    invest_assets,
-            "pf_super_balance": super_balance,
-        },
-        help="Updates the shared profile so FIRE, Dashboard, and Super pages use these figures.",
+        nw_export,
+        help="Updates the shared profile so FIRE, Dashboard, and Super pages use these figures. "
+             "When partnered, your super and partner super are exported separately.",
     )
 
 st.divider()

@@ -181,6 +181,10 @@ if _partnered:
         )
 
 # ── Export to Profile ─────────────────────────────────────────────────────────
+# Push back EVERY profile-backed input the user can edit on this page so cross-
+# page edits round-trip cleanly. Bonus income is page-local and intentionally
+# NOT folded into ``pf_gross_income`` — that would corrupt the profile salary
+# every time the user revisited this page.
 exp_left, exp_right = st.columns([3, 1])
 with exp_left:
     st.info(
@@ -189,19 +193,31 @@ with exp_left:
         f"FIRE Number = **${fire_number:,.0f}**"
     )
 with exp_right:
-    export_values = {
+    export_values: dict[str, object] = {
         "pf_monthly_savings": max(monthly_savings, 0),
         "pf_annual_spending": annual_spending,
-        "pf_gross_income":    gross_income + bonus_income,
+        "pf_gross_income":    gross_income,
+        "pf_hecs_balance":    hecs_balance,
+        "pf_private_cover":   private_cover,
+        "pf_inflation":       inflation_rate * 100,
+        "pf_portfolio_return": portfolio_return * 100,
+        "pf_swr":             swr * 100,
+        "pf_portfolio":       existing_portfolio,
+        "pf_super_balance":   existing_super,
     }
     if _partnered:
-        export_values["pf_partner_gross_income"] = p_gross_income + p_bonus_income
+        export_values.update({
+            "pf_partner_gross_income":  p_gross_income,
+            "pf_partner_hecs_balance":  p_hecs_balance,
+            "pf_partner_private_cover": p_private_cover,
+        })
 
     profile.export_button(
         "Export Savings & Spending to Profile",
         export_values,
-        help="Sends monthly savings and annual spending to the shared profile. "
-             "FIRE pages will use these as defaults.",
+        help="Sends every income, savings, and assumption value above to the "
+             "shared profile so other pages stay in sync. Page-local overrides "
+             "(bonus income, super contribution split) stay on this page.",
     )
 
 if monthly_savings < 0:

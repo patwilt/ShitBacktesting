@@ -115,6 +115,9 @@ with st.sidebar:
 
 # ── Tax calculations ──────────────────────────────────────────────────────────
 # Tax is individual in Australia; for couples, run effective_tax_rate per partner.
+# Keep ``your_gross_income`` separate from the household sum so we can export
+# each partner's salary back to the profile cleanly.
+your_gross_income = gross_income
 tax_result = effective_tax_rate(
     gross_income, 0, hecs_balance, 0, 0, CGTLaw.CURRENT,
     has_private_hospital_cover=private_cover,
@@ -134,10 +137,13 @@ if _partnered:
         "hecs_repayment":          tax_result["hecs_repayment"]          + tax_partner_result["hecs_repayment"],
         "net_income":              net_annual,
     }
-    gross_income = gross_income + p_gross_income  # used for chart y-axis scaling
+    household_gross = gross_income + p_gross_income
 else:
     net_annual = tax_result["net_income"]
+    household_gross = gross_income
 
+# Used for chart y-axis scaling.
+gross_income_for_chart = household_gross
 net_monthly = net_annual / 12.0
 
 # ── Core deposit math ─────────────────────────────────────────────────────────
@@ -409,9 +415,45 @@ fig3.update_layout(
     **CHART_LAYOUT,
     xaxis_title="", yaxis_title="Monthly (AUD)",
     height=380, showlegend=False,
-    yaxis=dict(range=[0, gross_income / 12 * 1.15]),
+    yaxis=dict(range=[0, gross_income_for_chart / 12 * 1.15]),
 )
 st.plotly_chart(fig3, width="stretch")
+
+# ── Export to Profile ─────────────────────────────────────────────────────────
+st.divider()
+st.subheader("Send to Profile")
+st.caption(
+    "Push every income/HECS/cover field above back to the shared profile so the "
+    "home page, Budget, and FIRE pages stay in sync. Property targets and "
+    "growth assumptions are page-local and stay here."
+)
+exp_l, exp_r = st.columns([3, 1])
+with exp_l:
+    if _partnered:
+        st.info(
+            f"**Household:** ${household_gross:,.0f}/yr gross  ·  "
+            f"You ${your_gross_income:,.0f}  ·  Partner ${p_gross_income:,.0f}"
+        )
+    else:
+        st.info(f"**Gross income to push back:** ${your_gross_income:,.0f}/yr")
+with exp_r:
+    deposit_export: dict[str, object] = {
+        "pf_gross_income":   your_gross_income,
+        "pf_hecs_balance":   hecs_balance,
+        "pf_private_cover":  private_cover,
+        "pf_inflation":      inflation_rate * 100,
+    }
+    if _partnered:
+        deposit_export.update({
+            "pf_partner_gross_income":  p_gross_income,
+            "pf_partner_hecs_balance":  p_hecs_balance,
+            "pf_partner_private_cover": p_private_cover,
+        })
+    profile.export_button(
+        "Export Income & HECS to Profile",
+        deposit_export,
+        help="Sends income, HECS and inflation back to your shared profile.",
+    )
 
 # ── Key assumptions ───────────────────────────────────────────────────────────
 with st.expander("📋 Assumptions & Methodology"):
