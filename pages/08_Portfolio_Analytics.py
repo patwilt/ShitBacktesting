@@ -1,14 +1,24 @@
-"""Page 6: Portfolio Analytics — strategy comparison, rolling returns, risk-return scatter."""
+"""Portfolio Analytics — strategy comparison, rolling returns, risk-return scatter."""
 from __future__ import annotations
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 
-from utils.colors import COLORS, STRATEGY_COLORS
+from utils.colors import COLORS, STRATEGY_COLORS, CHART_LAYOUT, CHART_BG
 from utils.csv_loader import load_latest_backtest_csv
+from utils import shared_profile as profile
 
 st.set_page_config(page_title="Portfolio Analytics", page_icon="📈", layout="wide")
+profile.init()
+
+with st.sidebar:
+    profile.sidebar_summary()
+
 st.title("📈 Portfolio Analytics")
+st.caption(
+    "Supporting tool for Step 6: deep-dive into risk, return, and drawdown across "
+    "every strategy to choose the right portfolio for your situation."
+)
 
 result = load_latest_backtest_csv()
 if result is None:
@@ -17,7 +27,12 @@ if result is None:
 data, csv_path = result
 st.caption(f"Using: `{csv_path}`")
 
-selected = st.multiselect("Strategies", data.strategies, default=data.strategies)
+selected = st.multiselect(
+    "Strategies",
+    data.strategies,
+    default=data.strategies[: min(3, len(data.strategies))],
+    help="Defaults to the first three strategies for readability. Add more to compare.",
+)
 if not selected:
     st.stop()
 
@@ -32,7 +47,7 @@ fig_bar.add_trace(go.Bar(x=selected, y=[medians_cagr[s]*100 for s in selected],
 fig_bar.add_trace(go.Bar(x=selected, y=[abs(medians_mdd.get(s, 0))*100 for s in selected],
                           name="Median MDD (%)", marker_color=COLORS["orange"],
                           hovertemplate="%{x}<br>MDD: %{y:.1f}%<extra></extra>"))
-fig_bar.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+fig_bar.update_layout(**CHART_LAYOUT,
                       barmode="group", yaxis_title="(%)", height=400,
                       xaxis=dict(tickangle=-20),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
@@ -47,7 +62,7 @@ for i, strat in enumerate(selected):
         name=strat, line=dict(color=color, width=1.5),
         hovertemplate=f"{strat}<br>%{{x|%Y-%m-%d}}: %{{y:.1f}}%<extra></extra>",
     ))
-fig_roll.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+fig_roll.update_layout(**CHART_LAYOUT,
                        xaxis=dict(title="Window End Date"),
                        yaxis=dict(tickformat=".1f", ticksuffix="%", title="20-Year CAGR"),
                        height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
@@ -58,9 +73,9 @@ scatter_data = [{"Strategy": s, "CAGR (%)": medians_cagr[s]*100,
                   "MDD (%)": abs(medians_mdd.get(s, 0))*100} for s in selected]
 fig_scatter = px.scatter(scatter_data, x="MDD (%)", y="CAGR (%)", text="Strategy",
                           color="Strategy", color_discrete_sequence=STRATEGY_COLORS,
-                          template="plotly_dark")
+                          template="plotly_white")
 fig_scatter.update_traces(textposition="top center", marker_size=12)
-fig_scatter.update_layout(paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+fig_scatter.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
                            xaxis_title="Median Max Drawdown (%)", yaxis_title="Median CAGR (%)",
                            showlegend=False, height=400)
 st.plotly_chart(fig_scatter, width='stretch')
@@ -68,8 +83,8 @@ st.plotly_chart(fig_scatter, width='stretch')
 with st.expander("📖 How to read these charts"):
     st.markdown("""
 **Median CAGR vs Max Drawdown (bar chart)**
-- **Green bars** — median 20-year Compound Annual Growth Rate across all rolling windows
-- **Orange bars** — median Maximum Drawdown (worst peak-to-trough decline in a window)
+- **Green bars**: median 20-year Compound Annual Growth Rate across all rolling windows
+- **Orange bars**: median Maximum Drawdown (worst peak-to-trough decline in a window)
 - Higher CAGR + lower MDD = better risk-adjusted return
 
 **Rolling CAGR Over Time (line chart)**
@@ -80,7 +95,7 @@ with st.expander("📖 How to read these charts"):
 **Risk-Return Scatter**
 - X-axis = how bad the drawdowns were (further right = more painful crashes)
 - Y-axis = how good the returns were (higher = better growth)
-- **Ideal position: top-left** — high return, low drawdown
+- **Ideal position: top-left**: high return, low drawdown
 - Distance from origin = overall return/risk profile
 
 **Asset Allocation pies**
@@ -104,7 +119,7 @@ if strats_with_alloc:
                 textinfo="label+percent",
             ))
             fig_pie.update_layout(
-                template="plotly_dark", paper_bgcolor="#0d1117",
+                template="plotly_white", paper_bgcolor=CHART_BG,
                 showlegend=True, height=250,
                 title=dict(text=strat[:30], font_size=11),
             )

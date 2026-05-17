@@ -1,10 +1,10 @@
-"""Page 2: FIRE Scenarios — Coast/Lean/Fat/Barista crossover analysis."""
+"""FIRE Scenarios — Coast/Lean/Fat/Barista crossover analysis."""
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
-from utils.colors import COLORS, STRATEGY_COLORS
+from utils.colors import COLORS, STRATEGY_COLORS, CHART_LAYOUT
 from utils.csv_loader import load_latest_backtest_csv
 from engines.portfolio_engine import run_yearly_projection, dca_crossover_year, salary_crossover_year
 from engines.calculation_engine import (
@@ -12,19 +12,33 @@ from engines.calculation_engine import (
     coast_fire_target, fire_age, preservation_age,
 )
 from engines.tax_engine import gross_withdrawal_for_net_spend
+from utils import shared_profile as profile
 
 st.set_page_config(page_title="FIRE Scenarios", page_icon="🎯", layout="wide")
+profile.init()
 st.title("🎯 FIRE Scenarios")
+st.caption("Step 6 of your journey: model different paths to financial independence. Compare strategies, DCA rates, and FIRE timelines side by side.")
+
+_pf_monthly_savings = profile.get("pf_monthly_savings")
+_pf_annual_spending = profile.get("pf_annual_spending")
+_default_dca        = int(_pf_monthly_savings) if _pf_monthly_savings is not None else 1_500
+_default_spending   = int(_pf_annual_spending) if _pf_annual_spending is not None else 80_000
 
 with st.sidebar:
+    profile.sidebar_summary()
+    if profile.is_set():
+        st.caption("✅ Pre-filled from profile. Adjust locally here.")
     st.header("💰 Inputs")
-    current_age   = st.number_input("Current Age",            min_value=18, max_value=80,  value=30)
-    salary        = st.number_input("Annual Salary (AUD)",    min_value=0, value=100_000, step=5_000)
+    current_age   = st.number_input("Current Age",            min_value=18, max_value=80,
+                                    value=profile.get("pf_age"))
+    salary        = st.number_input("Annual Salary (AUD)",    min_value=0,
+                                    value=profile.get("pf_gross_income"), step=5_000)
     salary_growth = st.number_input("Salary Growth (%/yr)",   min_value=0.0, value=3.0, step=0.5)
-    portfolio     = st.number_input("Starting Portfolio",     min_value=0, value=50_000, step=5_000)
+    portfolio     = st.number_input("Starting Portfolio",     min_value=0,
+                                    value=profile.get("pf_portfolio"), step=5_000)
     dca_method    = st.radio("DCA Method", ["Fixed Monthly Amount", "Percentage of Salary"])
     if dca_method == "Fixed Monthly Amount":
-        dca_value = st.number_input("Monthly DCA (AUD)", min_value=0, value=1_500, step=100)
+        dca_value = st.number_input("Monthly DCA (AUD)", min_value=0, value=_default_dca, step=100)
     else:
         dca_value = st.number_input("Salary %", min_value=0.0, max_value=100.0, value=20.0)
     dca_grows     = st.checkbox("DCA grows with salary", value=True)
@@ -32,25 +46,28 @@ with st.sidebar:
     st.divider()
     st.header("📉 Spending Targets")
     lean_spending    = st.number_input("Lean FIRE Spending/yr",   min_value=0, value=40_000, step=5_000)
-    median_spending  = st.number_input("Your FIRE Spending/yr",   min_value=0, value=80_000, step=5_000,
+    median_spending  = st.number_input("Your FIRE Spending/yr",   min_value=0,
+                                       value=_default_spending, step=5_000,
                                        help="Your personal target spending in retirement, after tax.")
     fat_spending     = st.number_input("Fat FIRE Spending/yr",    min_value=0, value=120_000, step=5_000)
     barista_income   = st.number_input("Barista Part-Time Income", min_value=0, value=20_000, step=2_000)
     barista_spending = st.number_input("Barista Total Spending",   min_value=0, value=60_000, step=5_000)
-    swr              = st.slider("SWR (%)", 2.0, 6.0, 4.0, 0.25) / 100.0
+    swr              = st.slider("SWR (%)", 2.0, 6.0, profile.get("pf_swr"), 0.25) / 100.0
     st.divider()
-    inflation_rate = st.slider("Inflation (%)", 0.0, 10.0, 2.5, 0.1)
+    inflation_rate = st.slider("Inflation (%)", 0.0, 10.0, profile.get("pf_inflation"), 0.1)
     horizon_years  = st.slider("Horizon (Years)", 5, 60, 35)
     st.divider()
     st.header("🏦 Superannuation")
-    birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2005, value=1990, step=1)
+    birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2006,
+                                    value=profile.get("pf_birth_year"), step=1)
     _default_pres = preservation_age(birth_year)
     pres_age      = st.number_input(
         "Super Access Age",
         min_value=55, max_value=75, value=_default_pres, step=1,
         help=f"Auto-set to {_default_pres} from your birth year. Override here if the law changes.",
     )
-    super_balance = st.number_input("Current Super Balance (AUD)", min_value=0, value=50_000, step=5_000)
+    super_balance = st.number_input("Current Super Balance (AUD)", min_value=0,
+                                    value=profile.get("pf_super_balance"), step=5_000)
     super_return  = st.slider("Super Annual Return (%, nominal)", 3.0, 12.0, 7.0, 0.5,
                               help="Nominal return before inflation. App converts to real return internally.")
     sgc_rate      = st.slider(
@@ -87,7 +104,7 @@ lean_gross    = gross_withdrawal_for_net_spend(lean_spending)
 median_gross  = gross_withdrawal_for_net_spend(median_spending)
 fat_gross     = gross_withdrawal_for_net_spend(fat_spending)
 # Barista FIRE: portfolio withdrawal is taxed on top of existing part-time income
-# (income-stacking effect — the part-time income consumes low-bracket space first)
+# (income-stacking effect - the part-time income consumes low-bracket space first)
 barista_net_draw = max(barista_spending - barista_income, 0)
 barista_gross = gross_withdrawal_for_net_spend(barista_net_draw, existing_income=barista_income)
 
@@ -96,7 +113,7 @@ median_num_adj  = median_gross  / swr
 fat_num_adj     = fat_gross     / swr
 barista_num_adj = barista_gross / swr
 
-# Projected age to reach each FIRE target — find best (earliest) strategy
+# Projected age to reach each FIRE target - find best (earliest) strategy
 def _best_fire_age(target: float) -> tuple[int | None, str | None]:
     candidates = [(fire_age(current_age, proj_df, target, s), s) for s in selected]
     candidates = [(a, s) for a, s in candidates if a is not None]
@@ -112,25 +129,25 @@ barista_age, barista_strat = _best_fire_age(barista_num_adj)
 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
 with t_col1:
     lean_delta = f"Age {lean_age} · ${lean_gross:,.0f}/yr gross" if lean_age else "Not in horizon"
-    st.metric("🥦 Lean FIRE (Tax-Adjusted)", f"${lean_num_adj:,.0f}",
+    st.metric("Lean FIRE (Tax-Adjusted)", f"${lean_num_adj:,.0f}",
               delta=lean_delta, delta_color="normal" if lean_age else "off",
               help=f"Portfolio to fund ${lean_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
                    f"Earliest via: {lean_strat or 'N/A'}")
 with t_col2:
     med_delta = f"Age {median_age} · ${median_gross:,.0f}/yr gross" if median_age else "Not in horizon"
-    st.metric("🎯 Your FIRE (Tax-Adjusted)", f"${median_num_adj:,.0f}",
+    st.metric("Your FIRE (Tax-Adjusted)", f"${median_num_adj:,.0f}",
               delta=med_delta, delta_color="normal" if median_age else "off",
               help=f"Portfolio to fund ${median_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
                    f"Earliest via: {median_strat or 'N/A'}")
 with t_col3:
     fat_delta = f"Age {fat_age} · ${fat_gross:,.0f}/yr gross" if fat_age else "Not in horizon"
-    st.metric("🥩 Fat FIRE (Tax-Adjusted)", f"${fat_num_adj:,.0f}",
+    st.metric("Fat FIRE (Tax-Adjusted)", f"${fat_num_adj:,.0f}",
               delta=fat_delta, delta_color="normal" if fat_age else "off",
               help=f"Portfolio to fund ${fat_spending:,}/yr after-tax at {swr*100:.1f}% SWR. "
                    f"Earliest via: {fat_strat or 'N/A'}")
 with t_col4:
     bar_delta = f"Age {barista_age} · ${barista_gross:,.0f}/yr gross" if barista_age else "Not in horizon"
-    st.metric("☕ Barista FIRE (Tax-Adjusted)", f"${barista_num_adj:,.0f}",
+    st.metric("Barista FIRE (Tax-Adjusted)", f"${barista_num_adj:,.0f}",
               delta=bar_delta, delta_color="normal" if barista_age else "off",
               help=f"Portfolio to fund ${barista_spending:,}/yr after-tax minus ${barista_income:,} "
                    f"part-time at {swr*100:.1f}% SWR. Earliest via: {barista_strat or 'N/A'}")
@@ -144,7 +161,7 @@ st.caption(
 )
 
 st.divider()
-st.subheader("🚀 The Double Crossover")
+st.subheader("The Double Crossover")
 fig = go.Figure()
 ages = proj_df["Year"] + current_age
 
@@ -168,12 +185,12 @@ for i, strat in enumerate(selected):
         fig.add_annotation(x=dca_yr + current_age, y=float(proj_df["Yearly_DCA"].iloc[dca_yr]),
                            text=f"Coast {strat[:8]} yr {dca_yr}", showarrow=True, arrowhead=2,
                            ax=-40, ay=ay_offset,
-                           bgcolor=COLORS["blue"], font=dict(color="white", size=10))
+                           bgcolor=COLORS["blue"], font=dict(color=COLORS["dark"], size=10))
     if sal_yr and sal_yr < len(proj_df):
         fig.add_annotation(x=sal_yr + current_age, y=float(proj_df["Salary"].iloc[sal_yr]),
                            text=f"FI {strat[:8]} yr {sal_yr}", showarrow=True, arrowhead=1,
                            ax=40, ay=ay_offset,
-                           bgcolor=color, font=dict(color="white", size=10))
+                           bgcolor=color, font=dict(color=COLORS["dark"], size=10))
 
 # Super preservation age vertical line
 if pres_age <= current_age + horizon_years:
@@ -182,7 +199,7 @@ if pres_age <= current_age + horizon_years:
                   annotation_font_color=COLORS["purple"],
                   annotation_position="top right")
 
-fig.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+fig.update_layout(**CHART_LAYOUT,
                   xaxis=dict(title="Age", dtick=5),
                   yaxis=dict(tickformat="$.3s", title="Annual Amount (Real AUD)"),
                   hovermode="x unified", height=550,
@@ -199,9 +216,9 @@ with st.expander("📖 How to read the Double Crossover chart"):
 | **Annual Profit > Annual Salary** (FI point) | Your portfolio generates more each year than your job does. You are financially independent. |
 
 **Reading the lines:**
-- **Yellow** — your gross salary, growing with salary growth rate
-- **Dotted yellow** — your annual DCA contribution
-- **Coloured lines** — each strategy's annual investment profit (growth minus contributions)
+- **Yellow**: your gross salary, growing with salary growth rate
+- **Dotted yellow**: your annual DCA contribution
+- **Coloured lines**: each strategy's annual investment profit (growth minus contributions)
 
 **What to look for:**
 - The earlier the crossovers occur, the sooner you reach each milestone
@@ -222,17 +239,17 @@ if milestones:
     cols = st.columns(len(milestones))
     for i, m in enumerate(milestones):
         with cols[i]:
-            st.metric(f"🏁 {m['Strategy']}", f"Age {m['FI Age']}", f"Year {m['FI Year']}")
+            st.metric(m["Strategy"], f"Age {m['FI Age']}", f"Year {m['FI Year']}")
     st.success(f"🎉 Earliest FI: **{best['Strategy']}** at age **{best['FI Age']}**")
 
 st.divider()
-st.subheader("🏦 Super Access Strategy")
+st.subheader("Super Access Strategy")
 sc1, sc2, sc3 = st.columns(3)
-sc1.metric("🔑 Super Preservation Age", str(pres_age),
+sc1.metric("Super Preservation Age", str(pres_age),
            help="Age you can first access your superannuation (based on birth year)")
 
 # Project super balance to preservation age:
-# each year — grow existing balance, add net-of-tax employer/voluntary contributions
+# each year: grow existing balance, add net-of-tax employer/voluntary contributions
 # salary grows at salary_growth rate; SGC contributions taxed at 15% flat
 years_to_pres  = max(pres_age - current_age, 0)
 _r             = super_return / 100.0
@@ -255,7 +272,7 @@ super_at_pres       = _super_bal / _inf_deflator
 avg_annual_contrib  = (_annual_contribs_total / years_to_pres / _inf_deflator) if years_to_pres > 0 else 0.0
 
 sc2.metric(
-    f"💰 Projected Super at Age {pres_age} (Real)", f"${super_at_pres:,.0f}",
+    f"Projected Super at Age {pres_age} (Real)", f"${super_at_pres:,.0f}",
     help=(
         f"Starting balance: ${super_balance:,}  ·  "
         f"Avg annual contribution (net of 15% tax, real): ~${avg_annual_contrib:,.0f}  ·  "
@@ -267,10 +284,10 @@ sc2.metric(
 )
 
 super_swr_income = super_at_pres * swr
-sc3.metric("📥 Super SWR Income", f"${super_swr_income:,.0f}/yr",
+sc3.metric("Super SWR Income", f"${super_swr_income:,.0f}/yr",
            help=f"Annual income from super at {swr*100:.1f}% SWR from age {pres_age}")
 
-# Bridge period — years between earliest FI and super access
+# Bridge period: years between earliest FI and super access
 best_sal_yr = min((salary_crossover_year(proj_df, s) for s in selected if salary_crossover_year(proj_df, s)), default=None)
 if best_sal_yr:
     fire_age_est = current_age + best_sal_yr
@@ -281,11 +298,11 @@ if best_sal_yr:
                 f"Super then contributes ~${super_swr_income:,.0f}/yr, reducing required non-super drawdown.")
     else:
         st.success(f"✅ You reach FI at age {fire_age_est}, **after** your super preservation age ({pres_age}). "
-                   f"Super is immediately accessible — it contributes ~${super_swr_income:,.0f}/yr to your income.")
+                   f"Super is immediately accessible, contributing ~${super_swr_income:,.0f}/yr to your income.")
 
 # ── Two-bucket drawdown chart ─────────────────────────────────────────────────
 st.divider()
-st.subheader("📊 Two-Bucket Drawdown Projection")
+st.subheader("Two-Bucket Drawdown Projection")
 
 # Determine FIRE age and median portfolio return
 fire_age_target = median_age if median_age else (current_age + horizon_years)
@@ -313,7 +330,7 @@ with ctrl1:
     sim_end_age = st.slider("Project to Age (death)", min_value=fire_age_target + 5, max_value=100, value=90, step=1)
 with ctrl2:
     bridge_withdrawal = st.number_input(
-        "Strat A — Bridge Withdrawal (AUD/yr)",
+        "Strat A: Bridge Withdrawal (AUD/yr)",
         min_value=0, value=int(median_gross), step=1_000,
         help="Strategy A only: annual withdrawal from non-super during bridge. Strategy B computes its own optimal rate.",
     )
@@ -360,7 +377,7 @@ def _sim_buckets(
                 ns  = max(ns, 0.0) * (1.0 + real_port_r) - leftover
     return ns_out, sup_out
 
-# ── Strategy A: SWR — draw SWR% of super post-preservation; non-super compounds
+# Strategy A: SWR - draw SWR% of super post-preservation; non-super compounds
 swr_post_w = (
     max(
         float(
@@ -423,7 +440,7 @@ ns_B, sup_B = _sim_buckets(non_super_at_fire, super_at_fire, deplete_both_w, dep
 
 # ── Strategy C FIRE age (computed FIRST so starting values reflect early FIRE) ──
 # Only need non-super to cover the finite bridge period, not an infinite SWR
-# portfolio — so the required amount is much lower → potentially FIRE earlier.
+# portfolio, so the required amount is much lower → potentially FIRE earlier.
 fire_age_C: int | None = None
 for _yr in range(len(proj_df)):
     _age_yr = current_age + _yr
@@ -443,7 +460,7 @@ for _yr in range(len(proj_df)):
 # bridge_years is for Strategy A's metric label (A always fires at fire_age_target)
 bridge_years = max(pres_age - fire_age_target, 0)
 
-# ── Strategy C: Non-Super First — correct starting values ─────────────────────
+# Strategy C: Non-Super First - correct starting values ─────────────────────
 # CRITICAL FIX: if fire_age_C < fire_age_target, salary and SGC contributions
 # STOP at fire_age_C, not fire_age_target. Super accumulates fewer years of SGC
 # contributions → lower super balance at preservation age.
@@ -537,17 +554,17 @@ total_B = [ns + s for ns, s in zip(ns_B, sup_B)]
 # ── Metrics ───────────────────────────────────────────────────────────────────
 ma1, ma2, ma3 = st.columns(3)
 ma1.metric(
-    "🌉 Strat A — Bridge Withdrawal",
+    "Strategy A: Bridge Withdrawal",
     f"${bridge_withdrawal:,.0f}/yr",
     help=f"Your input. Drawn from non-super over the {bridge_years}-year bridge (age {fire_age_target}–{pres_age}).",
 )
 ma2.metric(
-    "♻️ Strat A — Post-Super SWR",
+    "Strategy A: Post-Super SWR",
     f"${swr_post_w:,.0f}/yr",
     help=f"{swr*100:.1f}% SWR on ${super_at_pres_unlocked:,.0f} super at age {pres_age}. Super never depletes.",
 )
 ma3.metric(
-    "💥 Strat B — Spend Everything",
+    "Strategy B: Spend Everything",
     f"${deplete_both_w:,.0f}/yr",
     delta=f"+${deplete_both_w - bridge_withdrawal:,.0f}/yr vs A",
     help=f"Single inflation-adjusted rate that drains BOTH buckets to $0 by age {sim_end_age}.",
@@ -556,7 +573,7 @@ ma3.metric(
 st.divider()
 mc1, mc2, mc3 = st.columns(3)
 mc1.metric(
-    "🏃 Strat C — Max Bridge Spend",
+    "Strategy C: Max Bridge Spend",
     f"${strat_C_bridge_w:,.0f}/yr",
     delta=f"+${strat_C_bridge_w - bridge_withdrawal:,.0f}/yr vs A bridge",
     help=(
@@ -570,62 +587,62 @@ _fire_C_delta = (
     else ("Same date" if fire_age_C == fire_age_target else "Later")
 )
 mc2.metric(
-    "🎯 Strat C — FIRE Age",
+    "Strategy C: FIRE Age",
     _fire_C_str,
     delta=_fire_C_delta,
     help=(
-        f"With Strat C you only need enough non-super to fund ${bridge_withdrawal:,.0f}/yr "
-        f"for the bridge period — much less than an infinite-horizon SWR portfolio. "
-        f"Strat A requires age {fire_age_target}."
+        f"With Strategy C you only need enough non-super to fund ${bridge_withdrawal:,.0f}/yr "
+        f"for the bridge period, much less than an infinite-horizon SWR portfolio. "
+        f"Strategy A requires age {fire_age_target}."
     ),
 )
 mc3.metric(
-    "📦 Strat C — Post-Super Income",
+    "Strategy C: Post-Super Income",
     f"${strat_C_post_w:,.0f}/yr",
     help=(
         f"You FIRE at age {fire_age_C_start}, so SGC contributions stop then. "
         f"Super grows without contributions from age {fire_age_C_start} → {pres_age} "
         f"(real balance: ${super_at_pres_C:,.0f}), then drawn at ${strat_C_post_w:,.0f}/yr "
         f"to hit $0 by age {sim_end_age}. "
-        f"Strat A's sustainable SWR: ${swr_post_w:,.0f}/yr."
+        f"Strategy A's sustainable SWR: ${swr_post_w:,.0f}/yr."
     ),
 )
 
 # ── Chart ─────────────────────────────────────────────────────────────────────
-# Log scale can't plot 0 — clamp depleted values to $1 so the line stays visible.
+# Log scale can't plot 0, clamp depleted values to $1 so the line stays visible.
 _log_floor = lambda vals: [max(v, 1.0) for v in vals]
 
 fig_buckets = go.Figure()
 
 fig_buckets.add_trace(go.Scatter(
     x=sim_ages, y=_log_floor(ns_A),
-    name="Non-Super — A", fill="tozeroy",
+    name="Non-Super: A", fill="tozeroy",
     line=dict(color=COLORS["blue"], width=2),
-    fillcolor="rgba(9,132,227,0.12)",
+    fillcolor="rgba(66,117,160,0.12)",
     hovertemplate="Age %{x}<br>Non-Super A: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
     x=sim_ages, y=_log_floor(total_A),
-    name="Total — A (SWR, sustainable)", fill="tonexty",
+    name="Total: A (SWR, sustainable)", fill="tonexty",
     line=dict(color=COLORS["purple"], width=2),
-    fillcolor="rgba(108,92,231,0.18)",
+    fillcolor="rgba(112,96,168,0.18)",
     hovertemplate="Age %{x}<br>Total A: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
     x=sim_ages, y=_log_floor(total_B),
-    name="Total — B (Deplete Both)",
+    name="Total: B (Deplete Both)",
     line=dict(color=COLORS["orange"], width=2, dash="dash"),
     hovertemplate="Age %{x}<br>Total B: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
     x=sim_ages_C, y=_log_floor(ns_C),
-    name="Non-Super — C (empties at pres. age)",
+    name="Non-Super: C (empties at pres. age)",
     line=dict(color=COLORS["yellow"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Non-Super C: $%{y:,.0f}<extra></extra>",
 ))
 fig_buckets.add_trace(go.Scatter(
     x=sim_ages_C, y=_log_floor(total_C),
-    name="Total — C (Non-Super First)",
+    name="Total: C (Non-Super First)",
     line=dict(color=COLORS["mint"], width=2, dash="longdash"),
     hovertemplate="Age %{x}<br>Total C: $%{y:,.0f}<extra></extra>",
 ))
@@ -675,13 +692,13 @@ if nsC_dep:
                           annotation_font_color=COLORS["yellow"], annotation_position="bottom right")
 
 fig_buckets.update_layout(
-    template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+    **CHART_LAYOUT,
     xaxis=dict(title="Age", dtick=5),
     yaxis=dict(
         type="log",
         range=[5, 7],          # log10(100k)=5, log10(10M)=7
         tickformat="$.3s",
-        title="Portfolio Balance (Real AUD — log scale)",
+        title="Portfolio Balance (Real AUD, log scale)",
     ),
     hovermode="x unified", height=540,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -692,7 +709,7 @@ st.plotly_chart(fig_buckets, width="stretch")
 if fire_age_C and fire_age_C < fire_age_target:
     _bridge_at_C = max(pres_age - fire_age_C, 0)
     st.info(
-        f"⚡ **Strategy C lets you FIRE at age {fire_age_C}** — "
+        f"⚡ **Strategy C lets you FIRE at age {fire_age_C}**. "
         f"{fire_age_target - fire_age_C} year(s) earlier than Strategy A. "
         f"At age {fire_age_C} your non-super portfolio only needs to fund "
         f"${bridge_withdrawal:,.0f}/yr for {_bridge_at_C} years (until super unlocks at {pres_age}), "
@@ -716,7 +733,7 @@ if fire_age_C and fire_age_C != fire_age_target:
 
 def _fmt(lst: list, idx_map: dict, age: int) -> str:
     i = idx_map.get(age)
-    return f"${lst[i]:,.0f}" if i is not None else "—"
+    return f"${lst[i]:,.0f}" if i is not None else "-"
 
 _rows = []
 for age in sorted(_milestone_ages):
@@ -728,7 +745,7 @@ for age in sorted(_milestone_ages):
     if fire_age_C and age == fire_age_C and fire_age_C != fire_age_target:
         evts.append("🎯 FIRE (C)")
     if fire_age_C_start == fire_age_target and age == fire_age_target:
-        evts.append("🎯 FIRE (C)")  # same age — note it
+        evts.append("🎯 FIRE (C)")  # same age, note it
     if age == pres_age:
         evts.append("🔑 Super unlocked")
     if supB_dep and age == supB_dep:
@@ -741,7 +758,7 @@ for age in sorted(_milestone_ages):
         evts.append(f"🪦 Target age {sim_end_age}")
     _rows.append({
         "Age":         age,
-        "Event":       " | ".join(evts) if evts else "—",
+        "Event":       " | ".join(evts) if evts else "-",
         "Total A":     _fmt(total_A, _ab_idx, age),
         "Non-Super A": _fmt(ns_A,    _ab_idx, age),
         "Super A":     _fmt(sup_A,   _ab_idx, age),
@@ -772,15 +789,15 @@ Strategies A & B FIRE at age **{fire_age_target}**. Strategy C can FIRE as early
 | **Residual wealth** | Large | $0 | $0 |
 
 **Why Strategy C unlocks earlier FIRE:** You only need non-super to fund **${bridge_withdrawal:,.0f}/yr
-for {bridge_years_C} years** (age {fire_age_C_start}\u2192{pres_age}) — a finite annuity, much smaller
+for {bridge_years_C} years** (age {fire_age_C_start}\u2192{pres_age}): a finite annuity, much smaller
 than an infinite-horizon SWR portfolio. The trade-off: less super at preservation age.
 
 | Colour | Meaning |
 |--------|---------|
-| Blue fill → purple fill | Non-super + total — Strategy A |
-| Orange dashed | Total — Strategy B |
-| Yellow long-dash | Non-super — Strategy C (depletes at preservation age) |
-| Green long-dash | Total — Strategy C |
+| Blue fill → purple fill | Non-super + total: Strategy A |
+| Orange dashed | Total: Strategy B |
+| Yellow long-dash | Non-super: Strategy C (depletes at preservation age) |
+| Green long-dash | Total: Strategy C |
 | Teal vertical | Super preservation age |
 | Yellow vertical | Strategy C: non-super→super switch |
 """)

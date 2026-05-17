@@ -1,17 +1,26 @@
-"""Page 3: Historical Outcomes — empirical probability analysis of rolling windows."""
+"""Historical Outcomes — empirical probability analysis of rolling windows."""
 from __future__ import annotations
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 
-from utils.colors import COLORS, STRATEGY_COLORS
+from utils.colors import COLORS, STRATEGY_COLORS, CHART_LAYOUT, CHART_BG
 from utils.csv_loader import load_latest_backtest_csv
+from utils import shared_profile as profile
 from engines.simulation_engine import percentile_cagr, probability_beat, mdd_frequency, cagr_by_decade
 
 st.set_page_config(page_title="Historical Outcomes", page_icon="📜", layout="wide")
+profile.init()
+
+with st.sidebar:
+    profile.sidebar_summary()
+
 st.title("📜 Historical Outcomes")
-st.caption("Empirical distribution of rolling 20-year window returns — no synthetic randomness.")
+st.caption(
+    "Supporting evidence for Step 6: the historical record behind every projection. "
+    "Real rolling 20-year returns across strategies, no synthetic randomness."
+)
 
 result = load_latest_backtest_csv()
 if result is None:
@@ -42,7 +51,7 @@ for i, strat in enumerate(selected):
         marker_color=color,
         hovertemplate="%{x:.1f}% CAGR<br>Count: %{y}<extra>" + strat + "</extra>",
     ))
-fig_hist.update_layout(template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+fig_hist.update_layout(**CHART_LAYOUT,
                        barmode="overlay", xaxis_title="CAGR (%)", yaxis_title="# of windows",
                        height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_hist, width='stretch')
@@ -72,7 +81,7 @@ if not decade_df.empty:
     fig_heat = px.bar(decade_df.melt(id_vars="Decade", var_name="Strategy", value_name="Median CAGR"),
                       x="Decade", y="Median CAGR", color="Strategy", barmode="group",
                       color_discrete_sequence=STRATEGY_COLORS,
-                      template="plotly_dark")
-    fig_heat.update_layout(paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                      template="plotly_white")
+    fig_heat.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
                            yaxis_tickformat=".1%", height=400)
     st.plotly_chart(fig_heat, width='stretch')

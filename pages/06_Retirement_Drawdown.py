@@ -1,32 +1,50 @@
-"""Page 5: Retirement Drawdown — slider-adjustable withdrawal with depletion year indicator."""
+"""Retirement Drawdown — slider-adjustable withdrawal with depletion year indicator."""
 from __future__ import annotations
 import streamlit as st
 import plotly.graph_objects as go
 
-from utils.colors import COLORS, STRATEGY_COLORS
+from utils.colors import COLORS, STRATEGY_COLORS, CHART_LAYOUT
 from utils.csv_loader import load_latest_backtest_csv
 from engines.portfolio_engine import depletion_year, swr_income
+from utils import shared_profile as profile
 
 st.set_page_config(page_title="Retirement Drawdown", page_icon="💸", layout="wide")
+profile.init()
 st.title("💸 Retirement Drawdown")
-st.caption("Adjust your annual withdrawal and see when the money runs out.")
+st.caption("Step 6 of your journey: stress-test your retirement income. Model safe withdrawal rates, inflation, and portfolio depletion risk.")
+
+# Compute a default retirement portfolio: profile portfolio + super (rough at-retirement estimate)
+_pf_net_worth   = profile.get("pf_net_worth")
+_default_portf  = int(_pf_net_worth) if _pf_net_worth is not None else 1_500_000
+_pf_asp         = profile.get("pf_annual_spending")
+_default_withdraw = int(_pf_asp) if _pf_asp is not None else 80_000
 
 with st.sidebar:
+    profile.sidebar_summary()
+    if profile.is_set():
+        st.caption("✅ Pre-filled from profile. Adjust locally here.")
     st.header("💰 Portfolio")
-    portfolio       = st.number_input("Retirement Portfolio (AUD)", min_value=0, value=1_500_000, step=50_000)
-    annual_return   = st.slider("Annual Portfolio Return (%, nominal)", 0.0, 20.0, 6.0, 0.1,
+    portfolio       = st.number_input("Retirement Portfolio (AUD)", min_value=0,
+                                      value=_default_portf, step=50_000)
+    annual_return   = st.slider("Annual Portfolio Return (%, nominal)", 0.0, 20.0,
+                                profile.get("pf_portfolio_return"), 0.1,
                                 help="Nominal return before inflation. App converts to real return internally.") / 100.0
-    inflation_rate  = st.slider("Inflation Rate (%)",          0.0, 10.0, 2.5, 0.1) / 100.0
+    inflation_rate  = st.slider("Inflation Rate (%)", 0.0, 10.0,
+                                profile.get("pf_inflation"), 0.1) / 100.0
     st.divider()
     st.header("💸 Withdrawal")
-    swr_rate    = st.slider("Safe Withdrawal Rate (%)", 2.0, 10.0, 4.0, 0.25) / 100.0
+    swr_rate    = st.slider("Safe Withdrawal Rate (%)", 2.0, 10.0, profile.get("pf_swr"), 0.25) / 100.0
     swr_default = swr_income(portfolio, swr_rate)
     st.caption(f"4% SWR baseline: ${swr_default:,.0f}/yr")
+    _withdrawal_default = max(
+        min(_default_withdraw, min(int(portfolio), 500_000)),
+        10_000
+    )
     annual_withdrawal = st.slider(
         "Annual Withdrawal (AUD)",
         min_value=10_000, max_value=min(int(portfolio), 500_000),
-        value=int(swr_default), step=1_000,
-        help="Drag to see how long your portfolio lasts"
+        value=_withdrawal_default, step=1_000,
+        help="Drag to see how long your portfolio lasts. Pre-filled from your Budget page spending."
     )
     st.divider()
     max_years = st.slider("Simulation Horizon (Years)", 10, 100, 50, 5)
@@ -55,7 +73,7 @@ if dep_year:
 else:
     color = COLORS["mint"]
     icon  = "🏆"
-    label = f"Portfolio survives all **{max_years} years** — safe zone!"
+    label = f"Portfolio survives all **{max_years} years**. Safe zone!"
 
 st.markdown(f"### {icon} {label}")
 
@@ -92,14 +110,14 @@ fig.add_trace(go.Scatter(
     name="Portfolio Balance",
     line=dict(color=COLORS["blue"], width=3),
     fill="tozeroy",
-    fillcolor="rgba(9, 132, 227, 0.15)",
+    fillcolor="rgba(66, 117, 160, 0.15)",
     hovertemplate="Year %{x}<br>Balance: $%{y:,.0f}<extra></extra>",
 ))
 
 safe_zone_y = portfolio * 0.50
-fig.add_hrect(y0=0, y1=safe_zone_y, fillcolor="rgba(214, 48, 49, 0.08)", layer="below", line_width=0)
+fig.add_hrect(y0=0, y1=safe_zone_y, fillcolor="rgba(168, 72, 72, 0.08)", layer="below", line_width=0)
 fig.add_hline(y=safe_zone_y, line_dash="dash", line_color=COLORS["orange"],
-              annotation_text="50% — Caution Zone", annotation_font_color=COLORS["orange"])
+              annotation_text="50%: Caution Zone", annotation_font_color=COLORS["orange"])
 fig.add_hline(y=0, line_color=COLORS["red"], line_width=2,
               annotation_text="Depletion", annotation_font_color=COLORS["red"])
 
@@ -108,9 +126,9 @@ if dep_year and dep_year <= max_years:
                   annotation_text=f"Depletes year {dep_year}", annotation_font_color=COLORS["red"])
 
 fig.update_layout(
-    template="plotly_dark", paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+    **CHART_LAYOUT,
     xaxis=dict(title="Years in Retirement", dtick=5),
-    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Real AUD — today's dollars)"),
+    yaxis=dict(tickformat="$.3s", title="Portfolio Balance (Real AUD, today's dollars)"),
     height=500,
 )
 st.plotly_chart(fig, width='stretch')
@@ -119,25 +137,25 @@ with st.expander("📖 How to read this chart"):
     st.markdown("""
 **Portfolio Balance Over Time** simulates your retirement portfolio being drawn down each year.
 
-- **Blue line / shaded area** — your portfolio balance, year by year
-- **Orange dashed line (50%)** — caution zone: below this your portfolio may not last
-- **Red zone (shading)** — danger zone: below 50% of starting balance
-- **Red vertical line** — the year your portfolio hits zero (depletion year)
+- **Blue line / shaded area**: your portfolio balance, year by year
+- **Orange dashed line (50%)**: caution zone: below this your portfolio may not last
+- **Red zone (shading)**: danger zone: below 50% of starting balance
+- **Red vertical line**: the year your portfolio hits zero (depletion year)
 
 **The withdrawal slider** adjusts your annual drawdown. The depletion year updates in real time.
 
 **Inflation effect:** Your withdrawal amount stays constant in **real** (today's) purchasing power.
-The chart shows balances in today's dollars — the real return (nominal minus inflation) is used internally.
+The chart shows balances in today's dollars. The real return (nominal minus inflation) is used internally.
 
 **Safe zone guide:**
 | Depletion Year | Signal |
 |----------------|--------|
 | Never depletes | 🏆 Sustainable indefinitely |
 | > 30 years | ✅ Generally safe for a 30-year retirement |
-| 20–30 years | ⚠️ Moderate risk — consider reducing spending |
-| < 20 years | 🚨 High risk — portfolio likely insufficient |
+| 20–30 years | ⚠️ Moderate risk, consider reducing spending |
+| < 20 years | 🚨 High risk, portfolio likely insufficient |
 
-> Values shown in **real** (inflation-adjusted, today's) AUD. Your annual withdrawal maintains constant purchasing power — in nominal terms you would draw more each year due to inflation.
+> Values shown in **real** (inflation-adjusted, today's) AUD. Your annual withdrawal maintains constant purchasing power. In nominal terms you would draw more each year due to inflation.
 """)
 
 st.divider()
