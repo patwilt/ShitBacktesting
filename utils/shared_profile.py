@@ -50,16 +50,55 @@ PROFILE_DEFAULTS: dict[str, object] = {
 
 
 def init() -> None:
-    """Initialise session state with defaults for any missing keys."""
+    """Initialise session state with defaults for any missing keys.
+
+    Two concerns:
+
+    1. **Pending manual reset** — if the user clicked "Reset to Defaults",
+       ``_pf_reset_pending`` is True. Wipe every ``pf_*`` key back to its
+       default now, before any widget renders. (Streamlit forbids modifying a
+       widget's session-state key in the same run it is instantiated, so the
+       reset is deferred to the next run via this flag.)
+    2. **Missing keys** — any profile key that isn't in session state yet gets
+       seeded with its default (e.g. fresh session or new key added to schema).
+
+    NOTE: we deliberately avoid ``st.session_state.get()`` because Streamlit's
+    SessionState object proxies attribute access to key lookups, which makes
+    ``.get`` look like an unknown key rather than a dict method in some
+    runtime contexts. Use ``key in st.session_state`` instead.
+    """
+    pending_reset = (
+        "_pf_reset_pending" in st.session_state
+        and bool(st.session_state["_pf_reset_pending"])
+    )
+
+    if pending_reset:
+        for key in list(PROFILE_DEFAULTS.keys()):
+            st.session_state[key] = PROFILE_DEFAULTS[key]
+        st.session_state["_profile_saved"] = False
+        st.session_state["_pf_reset_pending"] = False
+        return
+
     for key, default in PROFILE_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = default
 
 
+def request_reset() -> None:
+    """Schedule a profile reset on the next run.
+
+    Streamlit forbids overwriting a widget-bound session-state key in the same
+    run that widget was rendered, so callers set this flag then call
+    ``st.rerun()``.  ``init()`` consumes the flag on the following run BEFORE
+    any widget renders, so defaults are applied cleanly.
+    """
+    st.session_state["_pf_reset_pending"] = True
+
+
 def get(key: str):
     """Return the current profile value, falling back to the default."""
     init()
-    return st.session_state.get(key, PROFILE_DEFAULTS.get(key))
+    return st.session_state[key] if key in st.session_state else PROFILE_DEFAULTS.get(key)
 
 
 def set_value(key: str, value) -> None:
@@ -69,13 +108,13 @@ def set_value(key: str, value) -> None:
 
 def is_set() -> bool:
     """True if the user has explicitly saved the profile on the home page."""
-    return bool(st.session_state.get("_profile_saved", False))
+    return "_profile_saved" in st.session_state and bool(st.session_state["_profile_saved"])
 
 
 def is_partnered() -> bool:
     """True if the user has enabled partner mode."""
     init()
-    return bool(st.session_state.get("pf_partner_enabled", False))
+    return "pf_partner_enabled" in st.session_state and bool(st.session_state["pf_partner_enabled"])
 
 
 # ── Household aggregations ────────────────────────────────────────────────────

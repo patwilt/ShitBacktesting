@@ -32,37 +32,40 @@ with st.sidebar:
         st.caption("Pre-filled from your profile.")
 
     st.markdown("**🧑 You**")
-    gross_income      = st.number_input("Gross Annual Salary (AUD)",   min_value=0, value=profile.get("pf_gross_income"), step=5_000)
-    bonus_income      = st.number_input("Annual Bonus / Side Income",  min_value=0, value=5_000,   step=1_000)
-    super_contribs    = st.number_input("Super Contributions/yr",      min_value=0, value=15_000,  step=1_000,
-                                        help="Employer SG + any salary sacrifice")
-    hecs_balance      = st.number_input("HECS-HELP Balance",           min_value=0, value=profile.get("pf_hecs_balance"), step=1_000)
-    private_cover     = st.checkbox("Private Hospital Cover", value=profile.get("pf_private_cover"))
+    gross_income   = st.number_input("Gross Annual Salary (AUD)", min_value=0, step=5_000, value=profile.get("pf_gross_income"))
+    bonus_income   = st.number_input("Annual Bonus / Side Income", min_value=0, value=5_000, step=1_000)
+    super_contribs = st.number_input("Super Contributions/yr", min_value=0, value=15_000, step=1_000,
+                                     help="Employer SG + any salary sacrifice")
+    hecs_balance   = st.number_input("HECS-HELP Balance", min_value=0, value=profile.get("pf_hecs_balance"), step=1_000)
+    private_cover  = st.checkbox("Private Hospital Cover", value=profile.get("pf_private_cover"))
 
     if _partnered:
         st.divider()
         st.markdown("**🧑‍🤝‍🧑 Your Partner**")
-        p_gross_income   = st.number_input("Partner Gross Salary (AUD)",  min_value=0, value=profile.get("pf_partner_gross_income"), step=5_000)
-        p_bonus_income   = st.number_input("Partner Bonus / Side",        min_value=0, value=0, step=1_000)
-        p_super_contribs = st.number_input("Partner Super Contributions/yr", min_value=0, value=int(p_gross_income * 0.115), step=1_000,
-                                            help="Defaults to 11.5% SG of partner salary. Add salary sacrifice if applicable.")
-        p_hecs_balance   = st.number_input("Partner HECS-HELP Balance",   min_value=0, value=profile.get("pf_partner_hecs_balance"), step=1_000)
-        p_private_cover  = st.checkbox("Partner Private Hospital Cover",  value=profile.get("pf_partner_private_cover"))
+        p_gross_income   = st.number_input("Partner Gross Salary (AUD)", min_value=0, step=5_000, value=profile.get("pf_partner_gross_income"))
+        p_bonus_income   = st.number_input("Partner Bonus / Side", min_value=0, value=0, step=1_000)
+        p_super_contribs = st.number_input("Partner Super Contributions/yr", min_value=0,
+                                           value=int(profile.get("pf_partner_gross_income") * 0.115),
+                                           step=1_000,
+                                           help="Defaults to 11.5% SG of partner salary. Add salary sacrifice if applicable.")
+        p_hecs_balance   = st.number_input("Partner HECS-HELP Balance", min_value=0, value=profile.get("pf_partner_hecs_balance"), step=1_000)
+        p_private_cover  = st.checkbox("Partner Private Hospital Cover", value=profile.get("pf_partner_private_cover"))
     else:
         p_gross_income = p_bonus_income = p_super_contribs = p_hecs_balance = 0
         p_private_cover = False
 
     st.divider()
     st.header("📈 Growth & Returns")
-    inflation_rate    = st.slider("Inflation (%/yr)",          0.0, 8.0,  profile.get("pf_inflation"),        0.25) / 100.0
-    portfolio_return  = st.slider("Portfolio Return (%/yr)",   0.0, 15.0, profile.get("pf_portfolio_return"), 0.25) / 100.0
-    income_growth     = st.slider("Annual Income Growth (%)",  0.0, 10.0, 3.0, 0.25) / 100.0
-    swr               = st.slider("Safe Withdrawal Rate (%)",  2.0, 6.0,  profile.get("pf_swr"),              0.25) / 100.0
+    # Clamp profile values to slider ranges to avoid out-of-range errors
+    inflation_rate   = st.slider("Inflation (%/yr)",         0.0, 8.0,  min(8.0,  max(0.0,  float(profile.get("pf_inflation")))),        0.25) / 100.0
+    portfolio_return = st.slider("Portfolio Return (%/yr)",  0.0, 15.0, min(15.0, max(0.0,  float(profile.get("pf_portfolio_return")))), 0.25) / 100.0
+    income_growth    = st.slider("Annual Income Growth (%)", 0.0, 10.0, 3.0, 0.25) / 100.0
+    swr              = st.slider("Safe Withdrawal Rate (%)", 2.0, 6.0,  min(6.0,  max(2.0,  float(profile.get("pf_swr")))),              0.25) / 100.0
 
     st.divider()
     st.header("🏦 Existing Wealth")
-    existing_portfolio   = st.number_input("Existing Investment Portfolio ($)", min_value=0, value=profile.get("pf_portfolio"),     step=5_000)
-    existing_super       = st.number_input("Existing Super Balance ($)",        min_value=0, value=profile.get("pf_super_balance"), step=5_000)
+    existing_portfolio    = st.number_input("Existing Investment Portfolio ($)", min_value=0, value=profile.get("pf_portfolio"),     step=5_000)
+    existing_super        = st.number_input("Existing Super Balance ($)",        min_value=0, value=profile.get("pf_super_balance"), step=5_000)
     annual_super_addition = st.number_input(
         "Total Super Contributions/yr ($)", min_value=0, value=super_contribs, step=1_000,
         help="Employer SG + salary sacrifice. Used in FIRE timeline to project super balance alongside portfolio.",
@@ -188,9 +191,11 @@ if _partnered:
 exp_left, exp_right = st.columns([3, 1])
 with exp_left:
     st.info(
-        f"**Calculated:** Monthly Savings = **${monthly_savings:,.0f}**  ·  "
-        f"Annual Spending = **${annual_spending:,.0f}**  ·  "
-        f"FIRE Number = **${fire_number:,.0f}**"
+        f"**Monthly Savings = ${monthly_savings:,.0f}**  ·  "
+        f"Annual Spending = ${annual_spending:,.0f}  ·  "
+        f"FIRE Number = ${fire_number:,.0f}  \n"
+        "📤 **Export** to push these to: **Home Deposit** (deposit timeline), "
+        "**FIRE Scenarios** (DCA + spending target), and **Retirement Drawdown** (withdrawal amount)."
     )
 with exp_right:
     export_values: dict[str, object] = {

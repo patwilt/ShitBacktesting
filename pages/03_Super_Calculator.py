@@ -54,19 +54,17 @@ with st.sidebar:
 
     st.header("👤 Personal Details")
     st.caption(f"Pre-filled from your profile ({person.lower()}).")
-    current_age        = st.slider("Current Age",    18, 65, min(max(profile.get(_key_age), 18), 65))
-    retirement_age     = st.slider("Retirement Age", 50, 75, min(max(profile.get("pf_retirement_age"), 50), 75))
-    years_to_retire    = max(retirement_age - current_age, 1)
+    current_age    = st.slider("Current Age",    18, 65, min(max(int(profile.get(_key_age)), 18), 65))
+    retirement_age = st.slider("Retirement Age", 50, 75, min(max(int(profile.get("pf_retirement_age")), 50), 75))
+    years_to_retire = max(retirement_age - current_age, 1)
 
     st.divider()
     st.header("💰 Current Super")
-    current_super      = st.number_input(_label_super, min_value=0,
-                                         value=profile.get(_key_super), step=5_000)
+    current_super  = st.number_input(_label_super, min_value=0, step=5_000, value=profile.get(_key_super))
 
     st.divider()
     st.header("💼 Income & Contributions")
-    gross_income       = st.number_input(_label_gross, min_value=0,
-                                         value=profile.get(_key_gross), step=5_000)
+    gross_income   = st.number_input(_label_gross, min_value=0, step=5_000, value=profile.get(_key_gross))
     sg_rate            = st.slider("Employer SG Rate (%)", 9.0, 12.0, 11.5, 0.25) / 100.0
     salary_sacrifice   = st.number_input(
         "Salary Sacrifice ($)", min_value=0, value=5_000, step=500,
@@ -81,7 +79,7 @@ with st.sidebar:
     st.divider()
     st.header("📈 Investment Returns")
     super_return       = st.slider("Super Fund Return (%/yr)", 0.0, 14.0, 7.5, 0.25) / 100.0
-    inflation_rate     = st.slider("Inflation (%/yr)",         0.0, 8.0, profile.get("pf_inflation"), 0.25) / 100.0
+    inflation_rate     = st.slider("Inflation (%/yr)",         0.0, 8.0, min(8.0, max(0.0, float(profile.get("pf_inflation")))), 0.25) / 100.0
 
     st.divider()
     st.header("💸 Drawdown (Post-Retirement)")

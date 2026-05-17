@@ -157,64 +157,91 @@ ui.section_header(
     "You can still override values locally on any individual page.",
 )
 
-# Partner toggle lives OUTSIDE the form so it can immediately show/hide partner fields.
-# Australian tax is individual, so the calculators compute each partner's tax separately.
+# Widget values are captured as return values (no key= binding).
+# "Save Profile" explicitly writes them to session state via profile.set_value(),
+# which creates user-managed keys that persist across page navigation.
+# (Streamlit clears widget-bound keys on navigation; explicit sets persist.)
+
 _partnered = st.toggle(
     "👥  Include a partner (model as a couple)",
-    key="pf_partner_enabled",
+    value=profile.get("pf_partner_enabled"),
     help="Australian income tax is calculated individually for each partner. "
          "Enable this to add a partner's salary, super, and HECS for accurate household projections.",
 )
 
-# Every widget below binds DIRECTLY to its ``pf_*`` session key. That way:
-#   - Initial values come from profile defaults (set by ``profile.init()``).
-#   - Edits inside the form land in session_state when the user clicks save,
-#     which is exactly the profile state every other page reads from.
-#   - Cross-page exports (Budget → profile) immediately reflect on this page
-#     too, with zero "shadow widget state" drift.
-with st.form("profile_form"):
-    st.markdown("**🧑 You**")
-    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-    r1c1.number_input("Current Age",         min_value=18, max_value=80,    step=1, key="pf_age")
-    r1c2.number_input("Retirement Age",      min_value=40, max_value=100,   step=1, key="pf_retirement_age")
-    r1c3.number_input("Birth Year",          min_value=1940, max_value=2006, step=1, key="pf_birth_year")
-    r1c4.checkbox("Private Hospital Cover",  key="pf_private_cover")
+st.markdown("**🧑 You**")
+r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+_age           = r1c1.number_input("Current Age",         min_value=18, max_value=80,     step=1,    value=profile.get("pf_age"))
+_ret_age       = r1c2.number_input("Retirement Age",      min_value=40, max_value=100,    step=1,    value=profile.get("pf_retirement_age"))
+_birth_year    = r1c3.number_input("Birth Year",          min_value=1940, max_value=2006, step=1,    value=profile.get("pf_birth_year"))
+_priv_cover    = r1c4.checkbox("Private Hospital Cover",  value=profile.get("pf_private_cover"))
 
-    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-    r2c1.number_input("Gross Annual Income ($)", min_value=0, step=5_000, key="pf_gross_income")
-    r2c2.number_input("HECS-HELP Balance ($)",   min_value=0, step=1_000, key="pf_hecs_balance")
-    r2c3.number_input("Your Super Balance ($)",  min_value=0, step=5_000, key="pf_super_balance")
-    r2c4.markdown("")
+r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+_gross         = r2c1.number_input("Gross Annual Income ($)", min_value=0,    step=5_000, value=profile.get("pf_gross_income"))
+_hecs          = r2c2.number_input("HECS-HELP Balance ($)",   min_value=0,    step=1_000, value=profile.get("pf_hecs_balance"))
+_super_bal     = r2c3.number_input("Your Super Balance ($)",  min_value=0,    step=5_000, value=profile.get("pf_super_balance"))
+r2c4.markdown("")
 
-    # Partner fields appear only when partner mode is enabled.
-    if _partnered:
-        st.divider()
-        st.markdown("**🧑‍🤝‍🧑 Your Partner**")
-        p1c1, p1c2, p1c3, p1c4 = st.columns(4)
-        p1c1.number_input("Partner Age",              min_value=18, max_value=80, step=1,     key="pf_partner_age")
-        p1c2.number_input("Partner Gross Income ($)", min_value=0,                step=5_000, key="pf_partner_gross_income")
-        p1c3.number_input("Partner HECS-HELP ($)",    min_value=0,                step=1_000, key="pf_partner_hecs_balance")
-        p1c4.number_input("Partner Super ($)",        min_value=0,                step=5_000, key="pf_partner_super_balance")
-        st.checkbox("Partner has Private Hospital Cover", key="pf_partner_private_cover")
-
+if _partnered:
     st.divider()
-    st.markdown("**🏦 Household Wealth & Assumptions**")
-    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-    r3c1.number_input(
-        "Investment Portfolio ($)", min_value=0, step=5_000, key="pf_portfolio",
-        help="Combined household shares, ETFs, and cash savings (excludes super and property).",
-    )
-    r3c2.number_input("Inflation (%/yr)",        min_value=0.0, max_value=15.0, step=0.25, format="%.2f", key="pf_inflation")
-    r3c3.number_input("Portfolio Return (%/yr)", min_value=0.0, max_value=25.0, step=0.25, format="%.2f", key="pf_portfolio_return")
-    r3c4.number_input("Safe Withdrawal Rate (%)", min_value=1.0, max_value=10.0, step=0.25, format="%.2f", key="pf_swr")
+    st.markdown("**🧑‍🤝‍🧑 Your Partner**")
+    p1c1, p1c2, p1c3, p1c4 = st.columns(4)
+    _p_age         = p1c1.number_input("Partner Age",              min_value=18, max_value=80, step=1,     value=profile.get("pf_partner_age"))
+    _p_gross       = p1c2.number_input("Partner Gross Income ($)", min_value=0,                step=5_000, value=profile.get("pf_partner_gross_income"))
+    _p_hecs        = p1c3.number_input("Partner HECS-HELP ($)",    min_value=0,                step=1_000, value=profile.get("pf_partner_hecs_balance"))
+    _p_super       = p1c4.number_input("Partner Super ($)",        min_value=0,                step=5_000, value=profile.get("pf_partner_super_balance"))
+    _p_priv_cover  = st.checkbox("Partner has Private Hospital Cover", value=profile.get("pf_partner_private_cover"))
+else:
+    _p_age = _p_gross = _p_hecs = _p_super = 0
+    _p_priv_cover = False
 
-    saved = st.form_submit_button("💾 Save Profile", type="primary")
+st.divider()
+st.markdown("**🏦 Household Wealth & Assumptions**")
+r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+_portfolio     = r3c1.number_input(
+    "Investment Portfolio ($)", min_value=0, step=5_000, value=profile.get("pf_portfolio"),
+    help="Combined household shares, ETFs, and cash savings (excludes super and property).",
+)
+_inflation     = r3c2.number_input("Inflation (%/yr)",        min_value=0.0, max_value=15.0, step=0.25, format="%.2f", value=profile.get("pf_inflation"))
+_port_return   = r3c3.number_input("Portfolio Return (%/yr)", min_value=0.0, max_value=25.0, step=0.25, format="%.2f", value=profile.get("pf_portfolio_return"))
+_swr           = r3c4.number_input("Safe Withdrawal Rate (%)", min_value=1.0, max_value=10.0, step=0.25, format="%.2f", value=profile.get("pf_swr"))
 
-if saved:
-    # Widgets already wrote to session_state on submit; just mark the profile
-    # as explicitly saved so other pages know the user has reviewed it.
-    profile.set_value("_profile_saved", True)
-    st.success("✅ Profile saved. All calculator pages are now pre-filled.")
+st.caption(
+    "💡 Fill in your numbers, then click **Save Profile** — every calculator page will be pre-filled instantly."
+)
+
+btn_col, reset_col, _ = st.columns([1, 1, 4])
+with btn_col:
+    if st.button("💾 Save Profile", type="primary"):
+        # Explicitly persist all values as user-managed session state keys.
+        # These survive page navigation (unlike widget-bound keys which Streamlit clears).
+        profile.set_value("pf_partner_enabled",       _partnered)
+        profile.set_value("pf_age",                   int(_age))
+        profile.set_value("pf_retirement_age",        int(_ret_age))
+        profile.set_value("pf_birth_year",            int(_birth_year))
+        profile.set_value("pf_private_cover",         bool(_priv_cover))
+        profile.set_value("pf_gross_income",          int(_gross))
+        profile.set_value("pf_hecs_balance",          int(_hecs))
+        profile.set_value("pf_super_balance",         int(_super_bal))
+        profile.set_value("pf_portfolio",             int(_portfolio))
+        profile.set_value("pf_inflation",             float(_inflation))
+        profile.set_value("pf_portfolio_return",      float(_port_return))
+        profile.set_value("pf_swr",                   float(_swr))
+        if _partnered:
+            profile.set_value("pf_partner_age",           int(_p_age))
+            profile.set_value("pf_partner_gross_income",  int(_p_gross))
+            profile.set_value("pf_partner_hecs_balance",  int(_p_hecs))
+            profile.set_value("pf_partner_super_balance", int(_p_super))
+            profile.set_value("pf_partner_private_cover", bool(_p_priv_cover))
+        profile.set_value("_profile_saved", True)
+        st.success("✅ Profile saved. All calculator pages are now pre-filled.")
+with reset_col:
+    if st.button(
+        "↺ Reset to Defaults",
+        help="Wipe every field back to its starter value.",
+    ):
+        profile.request_reset()
+        st.rerun()
 
 # Show calculated outputs pushed back from tool pages
 ms  = profile.get("pf_monthly_savings")

@@ -37,42 +37,49 @@ with st.sidebar:
     if profile.is_set():
         st.caption("✅ Pre-filled from profile. Adjust locally here.")
     st.header("💰 Inputs")
-    current_age   = st.number_input("Current Age",            min_value=18, max_value=80,
-                                    value=profile.get("pf_age"))
+    current_age   = st.number_input("Current Age", min_value=18, max_value=80, step=1, value=profile.get("pf_age"))
     salary_label  = "Household Salary (AUD)" if _partnered else "Annual Salary (AUD)"
-    salary        = st.number_input(salary_label,             min_value=0,
+    salary        = st.number_input(salary_label, min_value=0,
                                     value=int(_default_salary), step=5_000,
                                     help=("Combined household gross income (you + partner). "
                                           "Tax in this projection is approximated; for accurate "
                                           "per-partner tax breakdown see the Budget page.") if _partnered
                                     else "Pre-filled from your profile.")
-    salary_growth = st.number_input("Salary Growth (%/yr)",   min_value=0.0, value=3.0, step=0.5)
-    portfolio     = st.number_input("Starting Portfolio",     min_value=0,
-                                    value=profile.get("pf_portfolio"), step=5_000)
+    salary_growth = st.number_input("Salary Growth (%/yr)", min_value=0.0, value=3.0, step=0.5)
+    portfolio     = st.number_input("Starting Portfolio", min_value=0, step=5_000, value=profile.get("pf_portfolio"))
     dca_method    = st.radio("DCA Method", ["Fixed Monthly Amount", "Percentage of Salary"])
     if dca_method == "Fixed Monthly Amount":
-        dca_value = st.number_input("Monthly DCA (AUD)", min_value=0, value=_default_dca, step=100)
+        dca_value = st.number_input("Monthly DCA (AUD)", min_value=0, value=_default_dca, step=100,
+                                    help="Monthly investment amount. Pre-filled from your Budget page monthly savings surplus.")
     else:
         dca_value = st.number_input("Salary %", min_value=0.0, max_value=100.0, value=20.0)
+    if _pf_monthly_savings is not None:
+        st.caption(f"💡 From Budget: **${int(_pf_monthly_savings):,}/mo** surplus → used as DCA.")
     dca_grows     = st.checkbox("DCA grows with salary", value=True)
     stop_at_coast = st.toggle("Stop DCA at Coast Year", value=False)
     st.divider()
     st.header("📉 Spending Targets")
-    lean_spending    = st.number_input("Lean FIRE Spending/yr",   min_value=0, value=40_000, step=5_000)
+    # Lean/fat default relative to budget spending if available, else hard-coded
+    _lean_default = int(_pf_annual_spending * 0.65) if _pf_annual_spending is not None else 40_000
+    _fat_default  = int(_pf_annual_spending * 1.50) if _pf_annual_spending is not None else 120_000
+    lean_spending    = st.number_input("Lean FIRE Spending/yr",   min_value=0, value=_lean_default, step=5_000,
+                                       help="Frugal retirement budget. Defaults to 65% of your Budget page annual spending.")
     median_spending  = st.number_input("Your FIRE Spending/yr",   min_value=0,
                                        value=_default_spending, step=5_000,
-                                       help="Your personal target spending in retirement, after tax.")
-    fat_spending     = st.number_input("Fat FIRE Spending/yr",    min_value=0, value=120_000, step=5_000)
+                                       help="Your personal retirement spending target. Pre-filled from your Budget page annual spending.")
+    fat_spending     = st.number_input("Fat FIRE Spending/yr",    min_value=0, value=_fat_default, step=5_000,
+                                       help="Comfortable retirement budget. Defaults to 150% of your Budget page annual spending.")
+    if _pf_annual_spending is not None:
+        st.caption(f"💡 From Budget: **${int(_pf_annual_spending):,}/yr** spending → used as Your FIRE target.")
     barista_income   = st.number_input("Barista Part-Time Income", min_value=0, value=20_000, step=2_000)
     barista_spending = st.number_input("Barista Total Spending",   min_value=0, value=60_000, step=5_000)
-    swr              = st.slider("SWR (%)", 2.0, 6.0, profile.get("pf_swr"), 0.25) / 100.0
+    swr          = st.slider("SWR (%)", 2.0, 6.0, min(6.0, max(2.0, float(profile.get("pf_swr")))), 0.25) / 100.0
     st.divider()
-    inflation_rate = st.slider("Inflation (%)", 0.0, 10.0, profile.get("pf_inflation"), 0.1)
+    inflation_rate = st.slider("Inflation (%)", 0.0, 10.0, min(10.0, max(0.0, float(profile.get("pf_inflation")))), 0.1)
     horizon_years  = st.slider("Horizon (Years)", 5, 60, 35)
     st.divider()
     st.header("🏦 Superannuation")
-    birth_year    = st.number_input("Birth Year", min_value=1940, max_value=2006,
-                                    value=profile.get("pf_birth_year"), step=1)
+    birth_year   = st.number_input("Birth Year", min_value=1940, max_value=2006, step=1, value=profile.get("pf_birth_year"))
     _default_pres = preservation_age(birth_year)
     pres_age      = st.number_input(
         "Super Access Age",

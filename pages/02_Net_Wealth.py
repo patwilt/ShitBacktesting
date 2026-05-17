@@ -38,13 +38,13 @@ with col_assets:
     with st.expander("Investments", expanded=True):
         if _partnered:
             sc1, sc2 = st.columns(2)
-            your_super_balance    = sc1.number_input("Your Super ($)",    min_value=0, value=profile.get("pf_super_balance"),         step=5_000)
-            partner_super_balance = sc2.number_input("Partner Super ($)", min_value=0, value=profile.get("pf_partner_super_balance"), step=5_000)
+            your_super_balance    = sc1.number_input("Your Super ($)",    min_value=0, step=5_000, value=profile.get("pf_super_balance"))
+            partner_super_balance = sc2.number_input("Partner Super ($)", min_value=0, step=5_000, value=profile.get("pf_partner_super_balance"))
             super_balance = your_super_balance + partner_super_balance
         else:
-            super_balance = st.number_input("Superannuation ($)", min_value=0, value=profile.get("pf_super_balance"), step=5_000)
+            super_balance = st.number_input("Superannuation ($)", min_value=0, step=5_000, value=profile.get("pf_super_balance"))
             your_super_balance, partner_super_balance = super_balance, 0
-        shares_etfs      = st.number_input("Shares / ETFs ($)",           min_value=0, value=profile.get("pf_portfolio"),      step=5_000)
+        shares_etfs = st.number_input("Shares / ETFs ($)", min_value=0, step=5_000, value=profile.get("pf_portfolio"))
         crypto           = st.number_input("Crypto / Other Digital ($)",  min_value=0, value=5_000,   step=1_000)
         business         = st.number_input("Business Interests ($)",      min_value=0, value=0,       step=5_000)
     with st.expander("Property", expanded=True):
@@ -60,7 +60,7 @@ with col_liab:
         ppor_mortgage    = st.number_input("PPOR Mortgage ($)",           min_value=0, value=0,       step=10_000)
         inv_prop_loan    = st.number_input("Investment Property Loan ($)", min_value=0, value=0,      step=10_000)
     with st.expander("Personal Debt", expanded=True):
-        hecs_debt        = st.number_input("HECS-HELP Debt ($)",          min_value=0, value=22_000,  step=1_000)
+        hecs_debt        = st.number_input("HECS-HELP Debt ($)",          min_value=0, step=1_000, value=profile.get("pf_hecs_balance"))
         car_loan         = st.number_input("Car Loan ($)",                min_value=0, value=12_000,  step=1_000)
         personal_loan    = st.number_input("Personal Loan ($)",           min_value=0, value=0,       step=1_000)
         credit_card      = st.number_input("Credit Card Balance ($)",     min_value=0, value=3_000,   step=500)

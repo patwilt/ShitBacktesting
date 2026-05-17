@@ -37,14 +37,15 @@ with st.sidebar:
     st.header("💰 Portfolio")
     portfolio       = st.number_input("Retirement Portfolio (AUD)", min_value=0,
                                       value=_default_portf, step=50_000)
-    annual_return   = st.slider("Annual Portfolio Return (%, nominal)", 0.0, 20.0,
-                                profile.get("pf_portfolio_return"), 0.1,
-                                help="Nominal return before inflation. App converts to real return internally.") / 100.0
-    inflation_rate  = st.slider("Inflation Rate (%)", 0.0, 10.0,
-                                profile.get("pf_inflation"), 0.1) / 100.0
+    annual_return  = st.slider("Annual Portfolio Return (%, nominal)", 0.0, 20.0,
+                               min(20.0, max(0.0, float(profile.get("pf_portfolio_return")))), 0.1,
+                               help="Nominal return before inflation. App converts to real return internally.") / 100.0
+    inflation_rate = st.slider("Inflation Rate (%)", 0.0, 10.0,
+                               min(10.0, max(0.0, float(profile.get("pf_inflation")))), 0.1) / 100.0
     st.divider()
     st.header("💸 Withdrawal")
-    swr_rate    = st.slider("Safe Withdrawal Rate (%)", 2.0, 10.0, profile.get("pf_swr"), 0.25) / 100.0
+    swr_rate   = st.slider("Safe Withdrawal Rate (%)", 2.0, 10.0,
+                           min(10.0, max(2.0, float(profile.get("pf_swr")))), 0.25) / 100.0
     swr_default = swr_income(portfolio, swr_rate)
     st.caption(f"4% SWR baseline: ${swr_default:,.0f}/yr")
     _withdrawal_default = max(
