@@ -234,6 +234,22 @@ m3.metric(
     delta=f"{savings_rate * 100:.1f}% savings rate",
     delta_color="normal" if monthly_savings > 0 else "inverse",
 )
+# Mortgage timing — defined here so the FIRE number help text and later the
+# FIRE timeline both have access.  _pf_wants_purchase and _pf_mortgage_monthly
+# are read from the profile at the top of this file.
+_mort_p_yr   = int(profile.get("pf_purchase_years_from_now") or 0)
+_mort_term   = int(profile.get("pf_loan_term_years") or 0)
+_mort_po_yr  = _mort_p_yr + _mort_term
+_has_mort_data = (
+    _pf_wants_purchase
+    and _pf_mortgage_monthly is not None
+    and _mort_term > 0
+    and _mort_po_yr > 0
+)
+_mortgage_annual         = float(_pf_mortgage_monthly) * 12.0 if _has_mort_data else 0.0
+_spending_post_payoff    = max(annual_spending - _mortgage_annual, annual_spending * 0.5)
+_fire_number_post_payoff = _spending_post_payoff / swr if swr > 0 else 0.0
+
 _fire_num_help = (
     f"Portfolio needed so {swr*100:.1f}% annual withdrawal covers your ${annual_spending:,.0f}/yr expenses. "
     + (
@@ -427,27 +443,7 @@ if bool(profile.get("pf_kids_enabled")):
 _current_age = int(profile.get("pf_age") or 30)
 _pres_age    = preservation_age(int(profile.get("pf_birth_year") or (2026 - _current_age)))
 
-# Mortgage timing — used to compute a cashflow-based PV target in years_to_fire().
-# If mortgage data exists: target during mortgage years = PV(spending+mortgage for n yrs)
-#                                                        + PV(spending_only_number at payoff)
-# When n=0 (paid off), target falls back to spending_only_number (lower than fire_number).
-_mort_p_yr   = int(profile.get("pf_purchase_years_from_now") or 0)   # 0 = already paying
-_mort_term   = int(profile.get("pf_loan_term_years") or 0)
-_mort_po_yr  = _mort_p_yr + _mort_term                                # projection year of payoff
-_has_mort_data = (
-    _pf_wants_purchase
-    and _pf_mortgage_monthly is not None
-    and _mort_term > 0
-    and _mort_po_yr > 0
-)
-_mortgage_annual = float(_pf_mortgage_monthly) * 12.0 if _has_mort_data else 0.0
-
-# Spending after mortgage is paid (the long-run lower spending target)
-_spending_post_payoff = max(annual_spending - _mortgage_annual, annual_spending * 0.5)
-_fire_number_post_payoff = _spending_post_payoff / swr if swr > 0 else 0.0
-
 _real_r_pv = max(real_return, 0.01)   # keep positive so PV formula is well-defined
-
 
 # Pre-compute the gross withdrawal needed during the mortgage phase (computed once, not per call)
 _high_gross_budget = (

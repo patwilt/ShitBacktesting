@@ -328,6 +328,32 @@ def _cashflow_mort_threshold(yr: int, base_target: float, high_gross: float) -> 
     return high_gross * (1.0 - (1.0 + r) ** (-n)) / r + base_target / (1.0 + r) ** n
 
 
+def _kids_threshold_addition(yr: int) -> float:
+    """Extra portfolio needed at year yr to fund remaining kids costs.
+
+    Kids costs are finite (end when children turn 18), so we compute the
+    present value of the remaining kids cost stream from year yr onward,
+    discounted at the real portfolio return. This is more accurate than
+    dividing by SWR (which implies costs last forever).
+    """
+    if not _kids_enabled or not _kids_annual_costs:
+        return 0.0
+    r = _real_r_for_pv
+    pv = 0.0
+    for future_yr, cost in _kids_annual_costs.items():
+        offset = future_yr - yr
+        if offset < 0:
+            continue
+        disc = (1.0 + r) ** offset if abs(r) > 1e-9 else 1.0
+        pv += cost / disc
+    return pv
+
+
+def _full_adj_threshold(yr: int, base_target: float, high_gross: float) -> float:
+    """Combined FIRE threshold: mortgage PV + kids cost PV + base SWR target."""
+    return _cashflow_mort_threshold(yr, base_target, high_gross) + _kids_threshold_addition(yr)
+
+
 def _best_mort_adj_fire_age(
     base_target: float,
     high_gross: float,
@@ -352,12 +378,40 @@ def _best_mort_adj_fire_age(
     return min(candidates, key=lambda x: x[0])
 
 
+def _best_full_adj_fire_age(
+    base_target: float,
+    high_gross: float,
+) -> tuple[int | None, str | None]:
+    """Find earliest FIRE age meeting the combined mortgage + kids adjusted threshold."""
+    candidates = []
+    for s in selected:
+        col = f"{s}_Total"
+        if col not in proj_df.columns:
+            continue
+        for yr, port in enumerate(proj_df[col]):
+            if float(port) >= _full_adj_threshold(yr, base_target, high_gross):
+                candidates.append((current_age + yr, s))
+                break
+    if not candidates:
+        return None, None
+    return min(candidates, key=lambda x: x[0])
+
+
+_show_adj_metrics = _has_mortgage_data or _kids_enabled
 if _has_mortgage_data:
     median_age_adj, median_strat_adj = _best_mort_adj_fire_age(median_num_adj, median_gross_mort)
     lean_age_adj,   _                = _best_mort_adj_fire_age(lean_num_adj,   lean_gross_mort)
     fat_age_adj,    _                = _best_mort_adj_fire_age(fat_num_adj,    fat_gross_mort)
 else:
     median_age_adj = median_strat_adj = lean_age_adj = fat_age_adj = None
+
+# Full adjustment (mortgage + kids)
+if _show_adj_metrics:
+    median_age_full, median_strat_full = _best_full_adj_fire_age(median_num_adj, median_gross_mort)
+    lean_age_full,   _                 = _best_full_adj_fire_age(lean_num_adj,   lean_gross_mort)
+    fat_age_full,    _                 = _best_full_adj_fire_age(fat_num_adj,    fat_gross_mort)
+else:
+    median_age_full = median_strat_full = lean_age_full = fat_age_full = None
 
 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
 with t_col1:
@@ -393,83 +447,92 @@ st.caption(
     f"{'age ' + str(median_age) if median_age else 'not in horizon'})."
 )
 
-if _has_mortgage_data:
-    _p_yr  = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
-    _po_yr = _p_yr + int(_pf_loan_term_years)
+if _show_adj_metrics:
+    _p_yr  = int(_pf_purchase_yrs) if (_has_mortgage_data and _pf_purchase_yrs is not None) else 0
+    _po_yr = _p_yr + int(_pf_loan_term_years) if _has_mortgage_data else 0
     _payoff_age = current_age + _po_yr
 
-    _delay_med  = (median_age_adj - median_age) if (median_age_adj and median_age) else None
-    _delay_lean = (lean_age_adj   - lean_age)   if (lean_age_adj   and lean_age)   else None
-    _delay_fat  = (fat_age_adj    - fat_age)    if (fat_age_adj    and fat_age)    else None
+    # Use fully-adjusted ages (mortgage + kids) for the displayed metrics
+    _delay_med  = (median_age_full - median_age) if (median_age_full and median_age) else None
+    _delay_lean = (lean_age_full   - lean_age)   if (lean_age_full   and lean_age)   else None
+    _delay_fat  = (fat_age_full    - fat_age)    if (fat_age_full    and fat_age)    else None
 
-    # Portfolio threshold at each adjusted FIRE age (for display in metrics)
-    def _threshold_at_age(adj_age, base_target, high_gross):
+    def _full_thresh_at_age(adj_age, base_target, high_gross):
         if adj_age is None:
             return None
-        return _cashflow_mort_threshold(adj_age - current_age, base_target, high_gross)
+        return _full_adj_threshold(adj_age - current_age, base_target, high_gross)
 
-    _thresh_lean   = _threshold_at_age(lean_age_adj,   lean_num_adj,   lean_gross_mort)
-    _thresh_median = _threshold_at_age(median_age_adj, median_num_adj, median_gross_mort)
-    _thresh_fat    = _threshold_at_age(fat_age_adj,    fat_num_adj,    fat_gross_mort)
+    _thresh_lean   = _full_thresh_at_age(lean_age_full,   lean_num_adj,   lean_gross_mort)
+    _thresh_median = _full_thresh_at_age(median_age_full, median_num_adj, median_gross_mort)
+    _thresh_fat    = _full_thresh_at_age(fat_age_full,    fat_num_adj,    fat_gross_mort)
 
-    # Remaining mortgage years at each adjusted FIRE age
-    def _mort_yrs_at_adj_age(adj_age):
-        if adj_age is None:
+    def _mort_yrs_remaining(adj_age):
+        if adj_age is None or not _has_mortgage_data:
             return 0
         yr = adj_age - current_age
         return max(_po_yr - yr, 0) if yr >= _p_yr else 0
 
+    def _kids_cost_at_age(adj_age):
+        if adj_age is None or not _kids_enabled:
+            return 0.0
+        return _kids_annual_costs.get(adj_age - current_age, 0.0)
+
+    _adj_label = "Mortgage + Kids Adjusted" if (_has_mortgage_data and _kids_enabled) \
+                 else ("Mortgage-Adjusted" if _has_mortgage_data else "Kids-Adjusted")
+
     adj_a, adj_b, adj_c = st.columns(3)
     adj_a.metric(
-        "Lean FIRE (Mortgage-Adjusted)",
-        f"Age {lean_age_adj}" if lean_age_adj else "Not in horizon",
+        f"Lean FIRE ({_adj_label})",
+        f"Age {lean_age_full}" if lean_age_full else "Not in horizon",
         delta=(f"+{_delay_lean} yr vs unadjusted" if (_delay_lean and _delay_lean > 0)
-               else ("No delay — mortgage paid before Lean FIRE" if _delay_lean == 0 else None)),
+               else ("No delay" if _delay_lean == 0 else None)),
         delta_color="inverse" if (_delay_lean and _delay_lean > 0) else "normal",
-        help=(
-            f"Required portfolio at age {lean_age_adj}: ~${_thresh_lean:,.0f} "
-            f"({_mort_yrs_at_adj_age(lean_age_adj)} mortgage years remaining · "
-            f"${lean_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
-            f"gross withdrawal ${lean_gross_mort:,.0f}/yr). "
-            f"Drops to ${lean_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
-        ) if lean_age_adj else "",
+        help=(f"Required portfolio: ~${_thresh_lean:,.0f}. "
+              + (f"Mortgage: {_mort_yrs_remaining(lean_age_full)} yrs remaining. " if _has_mortgage_data else "")
+              + (f"Kids cost at this age: ${_kids_cost_at_age(lean_age_full):,.0f}/yr (PV-discounted into threshold)." if _kids_enabled else "")
+              ) if lean_age_full else "",
     )
     adj_b.metric(
-        "Your FIRE (Mortgage-Adjusted)",
-        f"Age {median_age_adj}" if median_age_adj else "Not in horizon",
+        f"Your FIRE ({_adj_label})",
+        f"Age {median_age_full}" if median_age_full else "Not in horizon",
         delta=(f"+{_delay_med} yr vs unadjusted" if (_delay_med and _delay_med > 0)
-               else ("No delay — mortgage paid before FIRE" if _delay_med == 0 else None)),
+               else ("No delay" if _delay_med == 0 else None)),
         delta_color="inverse" if (_delay_med and _delay_med > 0) else "normal",
-        help=(
-            f"Required portfolio at age {median_age_adj}: ~${_thresh_median:,.0f} "
-            f"({_mort_yrs_at_adj_age(median_age_adj)} mortgage years remaining · "
-            f"${median_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
-            f"gross withdrawal ${median_gross_mort:,.0f}/yr). "
-            f"Drops to ${median_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
-        ) if median_age_adj else "",
+        help=(f"Required portfolio: ~${_thresh_median:,.0f}. "
+              + (f"Mortgage: {_mort_yrs_remaining(median_age_full)} yrs remaining (${_mortgage_annual_repayment:,.0f}/yr). " if _has_mortgage_data else "")
+              + (f"Kids cost at this age: ${_kids_cost_at_age(median_age_full):,.0f}/yr. " if _kids_enabled else "")
+              + f"Drops to ${median_num_adj:,.0f} once mortgage + kids obligations end."
+              ) if median_age_full else "",
     )
     adj_c.metric(
-        "Fat FIRE (Mortgage-Adjusted)",
-        f"Age {fat_age_adj}" if fat_age_adj else "Not in horizon",
+        f"Fat FIRE ({_adj_label})",
+        f"Age {fat_age_full}" if fat_age_full else "Not in horizon",
         delta=(f"+{_delay_fat} yr vs unadjusted" if (_delay_fat and _delay_fat > 0)
-               else ("No delay — mortgage paid before Fat FIRE" if _delay_fat == 0 else None)),
+               else ("No delay" if _delay_fat == 0 else None)),
         delta_color="inverse" if (_delay_fat and _delay_fat > 0) else "normal",
-        help=(
-            f"Required portfolio at age {fat_age_adj}: ~${_thresh_fat:,.0f} "
-            f"({_mort_yrs_at_adj_age(fat_age_adj)} mortgage years remaining · "
-            f"${fat_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
-            f"gross withdrawal ${fat_gross_mort:,.0f}/yr). "
-            f"Drops to ${fat_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
-        ) if fat_age_adj else "",
+        help=(f"Required portfolio: ~${_thresh_fat:,.0f}. "
+              + (f"Mortgage: {_mort_yrs_remaining(fat_age_full)} yrs remaining. " if _has_mortgage_data else "")
+              + (f"Kids cost at this age: ${_kids_cost_at_age(fat_age_full):,.0f}/yr." if _kids_enabled else "")
+              ) if fat_age_full else "",
     )
-    st.caption(
-        f"🏠 **How mortgage-adjusted FIRE works:** the portfolio must support your spending "
-        f"**plus** ongoing mortgage repayments (${_mortgage_annual_repayment:,.0f}/yr) for the "
-        f"remaining loan term, then spending alone in perpetuity. "
-        f"The threshold uses a cashflow PV model — discounting the elevated withdrawal phase "
-        f"and the terminal SWR portfolio to the FIRE date at the real portfolio return. "
-        f"Mortgage fully paid at age {_payoff_age}, after which the standard FIRE number applies."
-    )
+
+    _caption_parts = []
+    if _has_mortgage_data:
+        _caption_parts.append(
+            f"🏠 **Mortgage:** portfolio must also fund ${_mortgage_annual_repayment:,.0f}/yr "
+            f"repayments until age {_payoff_age} (PV-discounted into threshold)."
+        )
+    if _kids_enabled:
+        _peak_yr   = max(_kids_annual_costs, key=_kids_annual_costs.get) if _kids_annual_costs else 0
+        _peak_cost = _kids_annual_costs.get(_peak_yr, 0)
+        _kids_end  = max(_kids_annual_costs.keys()) if _kids_annual_costs else 0
+        _caption_parts.append(
+            f"👶 **Kids:** peak cost ${_peak_cost:,.0f}/yr at year {_peak_yr} "
+            f"(age {current_age + _peak_yr}). All kids independent by year {_kids_end} "
+            f"(age {current_age + _kids_end}). PV of remaining kids costs added to FIRE threshold."
+        )
+    if _caption_parts:
+        st.caption("  \n".join(_caption_parts))
 
 st.divider()
 st.subheader("The Double Crossover")
@@ -483,16 +546,22 @@ fig.add_trace(go.Scatter(x=ages, y=proj_df["Yearly_DCA"], name="Annual DCA",
                           line=dict(color=COLORS["soft_yellow"], width=2, dash="dot"),
                           hovertemplate="DCA: $%{y:,.0f}<extra></extra>"))
 
-# Cashflow-based mortgage-adjusted FIRE target: PV of elevated spending phase + terminal SWR portfolio.
-# Starts higher than the standard FIRE number, decreases year-by-year, and equals median_num_adj
-# once the mortgage is paid off.
-if _has_mortgage_data:
-    _adj_targets = [_cashflow_mort_threshold(yr, median_num_adj, median_gross_mort) for yr in range(len(proj_df))]
+# Fully-adjusted FIRE target: PV of mortgage repayments + PV of remaining kids costs
+# + base SWR number.  Starts high, steps down as kids grow up and mortgage is paid off.
+if _show_adj_metrics:
+    _full_adj_targets = [
+        _full_adj_threshold(yr, median_num_adj, median_gross_mort)
+        for yr in range(len(proj_df))
+    ]
+    _adj_line_label = (
+        "Mortgage + Kids Adjusted Target" if (_has_mortgage_data and _kids_enabled)
+        else ("Mortgage-Adjusted Target" if _has_mortgage_data else "Kids-Adjusted Target")
+    )
     fig.add_trace(go.Scatter(
-        x=ages, y=_adj_targets,
-        name="Mortgage-Adjusted FIRE Target",
+        x=ages, y=_full_adj_targets,
+        name=_adj_line_label,
         line=dict(color=COLORS["red"], width=2, dash="dot"),
-        hovertemplate="Mortgage-Adj. Target: $%{y:,.0f}<extra></extra>",
+        hovertemplate=f"{_adj_line_label}: $%{{y:,.0f}}<extra></extra>",
     ))
 
 for i, strat in enumerate(selected):
