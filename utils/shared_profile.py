@@ -47,6 +47,12 @@ PROFILE_DEFAULTS: dict[str, object] = {
     "pf_salary_growth":    3.0,      # % per year, nominal salary growth rate
     "pf_salary_ceiling":   None,     # max salary in today's $; None = no cap
     "pf_partner_salary_ceiling": None,  # max partner salary in today's $; None = no cap
+    # Liabilities (household-level)
+    "pf_mortgage_balance":    0,       # outstanding mortgage balance ($)
+    "pf_high_interest_debt":  0,       # credit cards, personal loans, car loans ($)
+    # Housing & tax settings
+    "pf_home_ownership":      "renting",  # "renting" | "owner_occupier" | "investor"
+    "pf_cgt_law":             "current",  # "current" | "proposed_2027"
     # House purchase (set by Home Deposit page)
     "pf_wants_to_purchase":      False,
     "pf_property_value":         None,  # nominal property price at purchase date

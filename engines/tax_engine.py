@@ -80,6 +80,13 @@ _MLS_TIERS: list[tuple[float, float, float]] = [
 # ── Division 293 threshold ────────────────────────────────────────────────────
 _DIV_293_THRESHOLD = 250_000
 
+# ── Public policy constants (importable by UI and engine code) ────────────────
+# These are defined here so they are versioned alongside the tax logic and
+# never need to be hardcoded in UI components.
+SUPER_GUARANTEE_RATE: float = 0.12       # SG rate from 1 July 2025
+CONCESSIONAL_CAP: int       = 30_000     # Annual concessional contributions cap
+DIV_293_THRESHOLD: int      = 250_000    # Div 293 applies when income + CC > this
+
 
 def income_tax(taxable_income: float) -> float:
     """2024-25 Australian income tax (excl. Medicare levy)."""

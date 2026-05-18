@@ -4,12 +4,16 @@ Run: streamlit run fire_dashboard.py
 """
 from __future__ import annotations
 
+import datetime
 import streamlit as st
 
 from utils.csv_loader import find_csv_on_disk, load_from_uploaded_file, load_latest_backtest_csv
 from utils import shared_profile as profile
 from utils import ui
-from engines.tax_engine import effective_tax_rate, CGTLaw
+from engines.tax_engine import (
+    effective_tax_rate, CGTLaw,
+    SUPER_GUARANTEE_RATE, CONCESSIONAL_CAP, DIV_293_THRESHOLD,
+)
 
 st.set_page_config(
     page_title="Australian Financial Planner",
@@ -175,14 +179,16 @@ r1c1, r1c2, r1c3, r1c4 = st.columns(4)
 _age           = r1c1.number_input("Current Age",         min_value=18, max_value=80,  step=1, value=profile.get("pf_age"))
 _ret_age       = r1c2.number_input("Retirement Age",      min_value=40, max_value=100, step=1, value=profile.get("pf_retirement_age"))
 # Birth year is derived from age — always stays in sync.
-_birth_year    = 2026 - int(_age)
+_birth_year    = datetime.date.today().year - int(_age)
 r1c3.metric("Birth Year", _birth_year, help="Derived from your current age (2026 − age). Updates automatically.")
 _priv_cover    = r1c4.checkbox("Private Hospital Cover",  value=profile.get("pf_private_cover"))
 
 r2c1, r2c2, r2c3, r2c4 = st.columns(4)
 _gross         = r2c1.number_input("Gross Annual Income ($)", min_value=0,    step=5_000, value=profile.get("pf_gross_income"))
-_hecs          = r2c2.number_input("HECS-HELP Balance ($)",   min_value=0,    step=1_000, value=profile.get("pf_hecs_balance"))
-_super_bal     = r2c3.number_input("Your Super Balance ($)",  min_value=0,    step=5_000, value=profile.get("pf_super_balance"))
+_hecs          = r2c2.number_input("HECS-HELP Balance ($)",   min_value=0,    step=1_000, value=profile.get("pf_hecs_balance"),
+                                   help="Outstanding HECS-HELP debt. Repayments are compulsory via payroll and indexed to CPI each year.")
+_super_bal     = r2c3.number_input("Your Super Balance ($)",  min_value=0,    step=5_000, value=profile.get("pf_super_balance"),
+                                   help="Your superannuation balance (not your partner's). HECS repayment rates and super rules use 2024-25 law — verify current legislation before implementation.")
 r2c4.markdown("")
 
 if _partnered:
@@ -258,6 +264,37 @@ if _partnered:
                  "Indexed to inflation each year.",
         ))
 
+st.divider()
+st.markdown("**🏠 Housing & Liabilities**")
+st.caption(
+    "Tax calculations use 2024-25 Australian tax law. Verify current legislation before implementation."
+)
+rl1, rl2, rl3, rl4 = st.columns(4)
+_home_ownership = rl1.selectbox(
+    "Home Ownership",
+    options=["renting", "owner_occupier", "investor"],
+    format_func=lambda x: {"renting": "Renting", "owner_occupier": "Owner-Occupier", "investor": "Property Investor"}[x],
+    index=["renting", "owner_occupier", "investor"].index(profile.get("pf_home_ownership") or "renting"),
+    help="Used to determine whether the Home Deposit Planner step applies and to size emergency fund guidance.",
+)
+_mortgage_balance = rl2.number_input(
+    "Mortgage Balance ($)", min_value=0, step=10_000, value=profile.get("pf_mortgage_balance"),
+    help="Outstanding principal on your home loan. Leave 0 if renting or mortgage-free.",
+)
+_high_interest_debt = rl3.number_input(
+    "Other High-Interest Debt ($)", min_value=0, step=1_000, value=profile.get("pf_high_interest_debt"),
+    help="Combined balance of credit cards, personal loans, and car loans (not HECS or mortgage).",
+)
+_cgt_law = rl4.selectbox(
+    "Tax Law Scenario",
+    options=["current", "proposed_2027"],
+    format_func=lambda x: {"current": "Current (2024-25)", "proposed_2027": "Proposed 2027"}[x],
+    index=["current", "proposed_2027"].index(profile.get("pf_cgt_law") or "current"),
+    help="Current: 50% CGT discount for assets held >12 months. "
+         "Proposed 2027: indexation + 30% minimum tax floor. "
+         "Affects after-tax income and FIRE projections on all pages.",
+)
+
 st.caption(
     "💡 Fill in your numbers, then click **Save Profile** — every calculator page will be pre-filled instantly."
 )
@@ -282,12 +319,24 @@ with btn_col:
         profile.set_value("pf_salary_growth",           float(_salary_growth))
         profile.set_value("pf_salary_ceiling",          _salary_ceiling)
         profile.set_value("pf_partner_salary_ceiling",  _p_salary_ceiling)
+        profile.set_value("pf_home_ownership",          _home_ownership)
+        profile.set_value("pf_mortgage_balance",        int(_mortgage_balance))
+        profile.set_value("pf_high_interest_debt",      int(_high_interest_debt))
+        profile.set_value("pf_cgt_law",                 _cgt_law)
         if _partnered:
             profile.set_value("pf_partner_age",           int(_p_age))
             profile.set_value("pf_partner_gross_income",  int(_p_gross))
             profile.set_value("pf_partner_hecs_balance",  int(_p_hecs))
             profile.set_value("pf_partner_super_balance", int(_p_super))
             profile.set_value("pf_partner_private_cover", bool(_p_priv_cover))
+        else:
+            # Explicitly clear stale partner data so downstream pages never read
+            # ghost values after a user turns partner mode off.
+            profile.set_value("pf_partner_age",           0)
+            profile.set_value("pf_partner_gross_income",  0)
+            profile.set_value("pf_partner_hecs_balance",  0)
+            profile.set_value("pf_partner_super_balance", 0)
+            profile.set_value("pf_partner_private_cover", False)
         profile.set_value("_profile_saved", True)
         st.success("✅ Profile saved. All calculator pages are now pre-filled.")
 with reset_col:
@@ -320,15 +369,19 @@ ui.section_header(
 )
 
 # ── Priority detection ─────────────────────────────────────────────────────────
-_gross     = profile.get("pf_gross_income") or 110_000
-_portfolio = profile.get("pf_portfolio") or 0
-_super     = profile.get("pf_super_balance") or 0
-_hecs      = profile.get("pf_hecs_balance") or 0
+# These read from the *saved* profile, not from the live (unsaved) form widgets
+# above. The priority callout intentionally reflects the last-saved state so it
+# stays stable while the user is editing the form.
+_saved_gross     = profile.get("pf_gross_income") or 110_000
+_saved_portfolio = profile.get("pf_portfolio") or 0
+_saved_super     = profile.get("pf_super_balance") or 0
+_saved_hecs      = profile.get("pf_hecs_balance") or 0
 
 # Precise after-tax income using the real tax engine (includes LITO, Medicare, HECS, MLS)
 _priv_cover   = profile.get("pf_private_cover") or False
+_saved_cgt_law = CGTLaw(profile.get("pf_cgt_law") or "current")
 _net_annual   = effective_tax_rate(
-    _gross, 0, _hecs, 0, 0, CGTLaw.CURRENT,
+    _saved_gross, 0, _saved_hecs, 0, 0, _saved_cgt_law,
     has_private_hospital_cover=_priv_cover,
 )["net_income"]
 _savings_rate_est = (ms * 12 / _net_annual) if (ms is not None and _net_annual > 0) else None
@@ -356,14 +409,14 @@ def _priority() -> tuple[int, str, str]:
                 f"Your savings rate is approximately {_savings_rate_est*100:.0f}% of take-home pay. "
                 "Aim for at least 15–20%. Small cuts to variable spending compound into major "
                 "long-term wealth differences.")
-    if _hecs > 30_000 and _portfolio < 10_000:
+    if _saved_hecs > 30_000 and _saved_portfolio < 10_000:
         return (3,
                 "Build savings before aggressive debt paydown",
-                f"You have a HECS-HELP balance of ${_hecs:,.0f}. HECS is indexed to CPI and "
+                f"You have a HECS-HELP balance of ${_saved_hecs:,.0f}. HECS is indexed to CPI and "
                 "compulsory repaid through payroll, so it generally doesn't need manual extra repayments. "
                 "Focus first on any high-interest debt (credit cards, personal loans), then build your "
                 "emergency fund and investment portfolio.")
-    if _savings_rate_est is not None and _savings_rate_est >= 0.20 and _portfolio > 30_000:
+    if _savings_rate_est is not None and _savings_rate_est >= 0.20 and _saved_portfolio > 30_000:
         return (6,
                 "You're ready to optimise your investment strategy",
                 f"Strong savings rate (~{_savings_rate_est*100:.0f}%) and a growing portfolio. "
@@ -373,7 +426,7 @@ def _priority() -> tuple[int, str, str]:
         return (5,
                 "Consider salary sacrificing into super",
                 f"Good savings rate (~{_savings_rate_est*100:.0f}%). With a stable cashflow, "
-                "salary sacrificing into super up to the $30,000 concessional cap is likely your "
+                f"salary sacrificing into super up to the ${CONCESSIONAL_CAP:,} concessional cap is likely your "
                 "highest tax-efficiency move. Run the Super Calculator to model the impact.")
     return (4,
             "Set a goal for your surplus savings",
@@ -487,16 +540,16 @@ with col_left:
     # Step 1: Emergency Fund
     _s1_status = ""
     if ms is not None and ms > 0:
-        _s1_status = "→ Check your liquid cash vs. 1–3 months of your monthly expenses"
+        _s1_status = "→ Target 3–6 months of total expenses in a liquid, high-interest savings account"
     elif profile.is_set():
         _s1_status = "→ Run Budget & Savings first to find your monthly surplus and expense baseline"
 
     _step_card(
         1,
         "Build Your Emergency Fund",
-        "Start with 1 month of total expenses in a high-interest savings account. "
-        "Once the foundations below are done, grow this to 3–6 months. "
-        "Keep it separate from your everyday account. Friction is a feature, not a bug.",
+        "Target 3–6 months of total expenses in a high-interest savings account — more if you have "
+        "a mortgage, dependents, or variable income. Keep it separate from your everyday account. "
+        "If cash is tight, start with 1 month and build from there.",
         "An emergency fund prevents you selling investments at the worst possible time. "
         "It is not an investment. It is financial insurance.",
         "Budget & Savings", "1",
@@ -505,14 +558,14 @@ with col_left:
 
     # Step 2: Employer Super Matching
     _s2_status = ""
-    if _super > 0:
-        _s2_status = f"Super balance: ${_super:,.0f}. Confirm you're receiving full employer SG contributions"
+    if _saved_super > 0:
+        _s2_status = f"Super balance: ${_saved_super:,.0f}. Confirm you're receiving full employer SG contributions"
 
     _step_card(
         2,
         "Capture Employer Super Contributions",
-        "Confirm your employer is paying the 12% Superannuation Guarantee (SG) into your chosen fund "
-        "(12% from 1 July 2025). "
+        f"Confirm your employer is paying the {SUPER_GUARANTEE_RATE:.0%} Superannuation Guarantee (SG) "
+        "into your chosen fund. "
         "If they match voluntary salary sacrifice contributions, maximise that benefit before any other "
         "investing. It is an immediate, guaranteed return.",
         "Employer SG contributions are the single best guaranteed return available to you. "
@@ -524,8 +577,8 @@ with col_left:
 with col_right:
     # Step 3: High-Interest Debt
     _s3_status = ""
-    if _hecs > 0:
-        _s3_status = f"HECS balance: ${_hecs:,.0f}, generally low priority vs. other debts (CPI-indexed, salary-deducted)"
+    if _saved_hecs > 0:
+        _s3_status = f"HECS balance: ${_saved_hecs:,.0f}, generally low priority vs. other debts (CPI-indexed, salary-deducted)"
 
     _step_card(
         3,
@@ -557,10 +610,11 @@ with col_right:
     _step_card(
         5,
         "Optimise Super Contributions",
-        "Once high-interest debt is cleared, consider salary sacrificing into super up to the "
-        "$30,000 concessional cap. Super contributions are taxed at 15%, far below the 32.5–47% "
-        "most Australians pay on marginal income. Use Division 293 awareness if your income "
-        "exceeds $250,000. But don't over-contribute if you have near-term liquidity needs.",
+        f"Once high-interest debt is cleared, consider salary sacrificing into super up to the "
+        f"${CONCESSIONAL_CAP:,} concessional cap. Super contributions are taxed at 15%, far below the 32.5–47% "
+        f"most Australians pay on marginal income. Use Division 293 awareness if your income + "
+        f"concessional contributions exceed ${DIV_293_THRESHOLD:,}. "
+        "But don't over-contribute if you have near-term liquidity needs.",
         "Super is your most tax-efficient long-term vehicle. Compounding at lower tax rates inside "
         "super over 20–30 years is transformative, but it's locked away until preservation age (~60).",
         "Super Calculator", "3",
@@ -568,8 +622,8 @@ with col_right:
 
 # Step 6 full-width: Long-term Investing & FIRE
 _s6_status = ""
-if _portfolio > 0:
-    _s6_status = f"Investment portfolio: ${_portfolio:,.0f} · Run FIRE Scenarios to model your timeline"
+if _saved_portfolio > 0:
+    _s6_status = f"Investment portfolio: ${_saved_portfolio:,.0f} · Run FIRE Scenarios to model your timeline"
 
 _step_card(
     6,

@@ -263,8 +263,13 @@ if _show_dca_impact:
     # deducted from the investable surplus (i.e., not available for investment)
     # during the mortgage window. After payoff the mortgage bar is 0 — those
     # dollars flow back into the effective DCA via the boost override above.
+    #
+    # The mortgage is a fixed *nominal* repayment. In real (today's dollar) terms
+    # it shrinks every year as inflation erodes its purchasing power.
+    # Real repayment at year yr = nominal_repayment / (1 + inflation)^yr
+    _inf_decimal = inflation_rate / 100.0
     _mort_yr_costs_real = [
-        _m_monthly_real * 12.0
+        (_m_monthly_real * 12.0) / ((1.0 + _inf_decimal) ** yr)
         if (_has_mortgage_data and _m_purchase_yr <= yr < _m_payoff_yr)
         else 0.0
         for yr in _dca_years
