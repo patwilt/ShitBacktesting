@@ -103,9 +103,10 @@ with st.sidebar:
         help="How fast your gross income grows each year (nominal). "
              "Set once on the Home page; overridable locally here.",
     ) / 100.0
+
     _pf_ceiling = profile.get("pf_salary_ceiling")
     _show_ceiling = st.toggle(
-        "Advanced: Set Salary Ceiling", value=_pf_ceiling is not None,
+        "Advanced: Set Your Salary Ceiling", value=_pf_ceiling is not None,
         help="Define a maximum salary in today's purchasing power. "
              "Pre-filled from the Home page ceiling if set.",
     )
@@ -120,6 +121,25 @@ with st.sidebar:
             help="Maximum salary in today's purchasing power. "
                  "Automatically indexed to inflation each year.",
         ))
+
+    p_salary_ceiling_today: float | None = None
+    if _partnered:
+        _pf_p_ceiling = profile.get("pf_partner_salary_ceiling")
+        _p_show_ceiling = st.toggle(
+            "Advanced: Set Partner Salary Ceiling", value=_pf_p_ceiling is not None,
+            help="Define a maximum salary for your partner in today's purchasing power. "
+                 "Pre-filled from the Home page partner ceiling if set.",
+        )
+        if _p_show_ceiling:
+            _p_ceil_default = int(_pf_p_ceiling) if _pf_p_ceiling is not None else int(max(p_gross_income * 2, p_gross_income + 50_000))
+            p_salary_ceiling_today = float(st.number_input(
+                "Partner Salary Ceiling (Today's Dollars, AUD)",
+                min_value=int(p_gross_income) if p_gross_income > 0 else 0,
+                value=_p_ceil_default,
+                step=10_000,
+                help="Maximum partner salary in today's purchasing power. "
+                     "Automatically indexed to inflation each year.",
+            ))
 
     st.divider()
     st.header("🏦 Mortgage")
@@ -211,10 +231,19 @@ def lmi_cost(price: float, dep_pct: float) -> float:
 # ── Salary projection helpers ─────────────────────────────────────────────────
 
 def _proj_gross_single(base_gross: float, yrs: float) -> float:
-    """Nominal gross income at `yrs` years, capped by ceiling if set."""
+    """Nominal gross income at `yrs` years, capped by your salary ceiling if set."""
     grown = base_gross * (1 + salary_growth_rate) ** yrs
     if salary_ceiling_today is not None and salary_ceiling_today > 0:
         nominal_ceiling = salary_ceiling_today * (1 + inflation_rate) ** yrs
+        grown = min(grown, nominal_ceiling)
+    return grown
+
+
+def _proj_gross_partner(base_gross: float, yrs: float) -> float:
+    """Nominal partner gross income at `yrs` years, capped by partner ceiling if set."""
+    grown = base_gross * (1 + salary_growth_rate) ** yrs
+    if p_salary_ceiling_today is not None and p_salary_ceiling_today > 0:
+        nominal_ceiling = p_salary_ceiling_today * (1 + inflation_rate) ** yrs
         grown = min(grown, nominal_ceiling)
     return grown
 
@@ -223,14 +252,14 @@ def proj_household_gross(yrs: float) -> float:
     """Combined household gross income at `yrs` years from now."""
     total = _proj_gross_single(gross_income, yrs)
     if _partnered:
-        total += _proj_gross_single(p_gross_income, yrs)
+        total += _proj_gross_partner(p_gross_income, yrs)
     return total
 
 
 # Projected income at exact purchase date (target_years out).
 # Run the actual tax engine so net income is accurate, not just proportionally scaled.
 _proj_gross_you_at_purchase     = _proj_gross_single(gross_income, target_years)
-_proj_gross_partner_at_purchase = _proj_gross_single(p_gross_income, target_years) if _partnered else 0.0
+_proj_gross_partner_at_purchase = _proj_gross_partner(p_gross_income, target_years) if _partnered else 0.0
 
 _proj_tax_you = effective_tax_rate(
     _proj_gross_you_at_purchase, 0, 0, 0, 0, CGTLaw.CURRENT,
@@ -510,6 +539,137 @@ else:
 
 st.divider()
 
+# ── Purchase commitment ────────────────────────────────────────────────────────
+st.subheader("🏠 Purchase Commitment")
+intend_to_purchase = st.checkbox(
+    "I intend to purchase this property",
+    value=bool(profile.get("pf_wants_to_purchase")),
+    help="When checked, your mortgage and property details are exported to your profile "
+         "so the Budget & Savings page stays in sync with your planned mortgage repayment.",
+)
+
+if intend_to_purchase:
+    # Pull budget data to compute true investable surplus at purchase date.
+    # pf_annual_spending = total expenses (including current housing) from Budget export.
+    # pf_current_housing_cost = the rent/mortgage input from Budget export.
+    # Non-housing expenses = pf_annual_spending/12 - pf_current_housing_cost.
+    # At purchase those non-housing costs persist; housing cost becomes the mortgage.
+    _pf_annual_spending   = profile.get("pf_annual_spending")
+    _pf_current_housing   = profile.get("pf_current_housing_cost")
+    _has_budget_data      = _pf_annual_spending is not None and _pf_current_housing is not None
+
+    if _has_budget_data:
+        _monthly_non_housing  = max(_pf_annual_spending / 12 - _pf_current_housing, 0)
+        _total_outgoings      = monthly_repayment + _monthly_non_housing
+        investable_surplus    = proj_net_monthly - _total_outgoings
+    else:
+        _monthly_non_housing = None
+        _total_outgoings     = monthly_repayment
+        investable_surplus   = proj_net_monthly - monthly_repayment
+
+    st.caption(
+        f"Post-purchase snapshot at purchase date — in **{target_years} year(s)**, "
+        f"projected property value **${future_price:,.0f}** (nominal)."
+    )
+
+    if _has_budget_data:
+        ib1, ib2, ib3, ib4 = st.columns(4)
+    else:
+        ib1, ib2, ib3 = st.columns(3)
+        ib4 = None
+
+    ib1.metric(
+        "Projected Net Monthly Income",
+        f"${proj_net_monthly:,.0f}",
+        help=f"Projected household take-home at purchase date in {target_years} years.",
+    )
+    ib2.metric(
+        "Monthly Mortgage Repayment",
+        f"${monthly_repayment:,.0f}",
+        help="Principal & interest at the mortgage rate and term set above.",
+    )
+    if _has_budget_data and ib4 is not None:
+        ib3.metric(
+            "Other Living Expenses",
+            f"${_monthly_non_housing:,.0f}",
+            help="Non-housing expenses from your Budget export (all expenses minus your current rent/mortgage). "
+                 "These persist after you buy — only the housing line changes.",
+        )
+        ib4.metric(
+            "Monthly Investable Surplus",
+            f"${investable_surplus:,.0f}",
+            delta="positive cashflow" if investable_surplus > 0 else "cashflow deficit",
+            delta_color="normal" if investable_surplus > 0 else "inverse",
+            help="Projected income minus mortgage repayment minus all other living expenses. "
+                 "This is what remains to invest each month at purchase.",
+        )
+    else:
+        ib3.metric(
+            "Remaining After Mortgage",
+            f"${investable_surplus:,.0f}",
+            delta="positive cashflow" if investable_surplus > 0 else "cashflow deficit",
+            delta_color="normal" if investable_surplus > 0 else "inverse",
+            help="Projected income minus mortgage repayment. "
+                 "Export your Budget & Savings to include living expenses in this figure.",
+        )
+        st.caption(
+            "💡 Export your **Budget & Savings** to see your full investable surplus "
+            "after mortgage *and* living expenses."
+        )
+
+    st.info(
+        f"💡 **Home equity note:** Your deposit of **${future_deposit:,.0f}** is tied up as equity "
+        f"in the property at purchase — it is not available as investable cash. "
+        f"Home equity grows as the property appreciates and the mortgage is paid down."
+    )
+    if investable_surplus < 0:
+        _deficit_cause = (
+            f"mortgage (${monthly_repayment:,.0f}/mo) + living expenses (${_monthly_non_housing:,.0f}/mo)"
+            if _has_budget_data else f"mortgage repayment (${monthly_repayment:,.0f}/mo)"
+        )
+        st.error(
+            f"🚨 Projected income at purchase (${proj_net_monthly:,.0f}/mo) is less than "
+            f"{_deficit_cause}. "
+            f"Consider a larger deposit, cheaper property, or a longer loan term."
+        )
+
+    # ── Export purchase commitment ────────────────────────────────────────────
+    st.divider()
+    _surplus_for_export: float | None = investable_surplus if _has_budget_data else None
+    _ex_info_col, _ex_btn_col = st.columns([3, 1])
+    with _ex_info_col:
+        if _has_budget_data:
+            st.info(
+                f"📤 **Ready to export:** monthly investable surplus of **${max(investable_surplus, 0):,.0f}** "
+                f"will auto-fill the Monthly DCA on the **FIRE Scenarios** page."
+            )
+        else:
+            st.warning(
+                "💡 For a more accurate number, export your **Budget & Savings** first — "
+                "then the investable surplus will account for all living expenses, not just the mortgage. "
+                f"Exporting income minus mortgage only: **${max(investable_surplus, 0):,.0f}/mo**."
+            )
+    with _ex_btn_col:
+        _purchase_export = {
+            "pf_wants_to_purchase":          True,
+            "pf_property_value":             future_price,
+            "pf_mortgage_loan_amount":       loan_amount,
+            "pf_mortgage_monthly":           monthly_repayment,
+            "pf_mortgage_rate":              mortgage_rate,
+            "pf_loan_term_years":            loan_term_years,
+            "pf_purchase_years_from_now":    target_years,
+            "pf_monthly_investable_surplus": _surplus_for_export,
+        }
+        profile.export_button(
+            "Export Purchase Plan to Profile",
+            _purchase_export,
+            help="Saves your purchase commitment, mortgage details, and investable surplus "
+                 "to the shared profile. FIRE Scenarios will use the surplus as the default "
+                 "monthly investment amount.",
+        )
+
+st.divider()
+
 # ── Savings trajectory chart ──────────────────────────────────────────────────
 st.subheader("Savings vs Property Target Over Time")
 
@@ -714,12 +874,19 @@ st.caption(
 exp_l, exp_r = st.columns([3, 1])
 with exp_l:
     if _partnered:
-        st.info(
+        _info_txt = (
             f"**Household:** ${household_gross:,.0f}/yr gross  ·  "
             f"You ${your_gross_income:,.0f}  ·  Partner ${p_gross_income:,.0f}"
         )
     else:
-        st.info(f"**Gross income to push back:** ${your_gross_income:,.0f}/yr")
+        _info_txt = f"**Gross income to push back:** ${your_gross_income:,.0f}/yr"
+    if intend_to_purchase:
+        _info_txt += (
+            f"  \n🏠 **Purchase plan included:** property ${future_price:,.0f}  ·  "
+            f"loan ${loan_amount:,.0f}  ·  mortgage ${monthly_repayment:,.0f}/mo  ·  "
+            f"in {target_years} yr(s)"
+        )
+    st.info(_info_txt)
 with exp_r:
     deposit_export: dict[str, object] = {
         "pf_gross_income":   your_gross_income,
@@ -733,6 +900,28 @@ with exp_r:
             "pf_partner_hecs_balance":  p_hecs_balance,
             "pf_partner_private_cover": p_private_cover,
         })
+    if intend_to_purchase:
+        # Compute investable surplus for export using budget profile data.
+        # (Mirrors the logic in the "After You Buy" display section above.)
+        _exp_annual_spending = profile.get("pf_annual_spending")
+        _exp_current_housing = profile.get("pf_current_housing_cost")
+        _exp_investable: float | None = None
+        if _exp_annual_spending is not None and _exp_current_housing is not None:
+            _exp_non_housing = max(_exp_annual_spending / 12 - _exp_current_housing, 0)
+            _exp_investable = proj_net_monthly - monthly_repayment - _exp_non_housing
+        deposit_export.update({
+            "pf_wants_to_purchase":          True,
+            "pf_property_value":             future_price,
+            "pf_mortgage_loan_amount":       loan_amount,
+            "pf_mortgage_monthly":           monthly_repayment,
+            "pf_mortgage_rate":              mortgage_rate,
+            "pf_loan_term_years":            loan_term_years,
+            "pf_purchase_years_from_now":    target_years,
+            "pf_monthly_investable_surplus": _exp_investable,
+        })
+    else:
+        deposit_export["pf_wants_to_purchase"] = False
+        deposit_export["pf_monthly_investable_surplus"] = None
     profile.export_button(
         "Export Income & HECS to Profile",
         deposit_export,

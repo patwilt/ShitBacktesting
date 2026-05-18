@@ -9,6 +9,7 @@ import streamlit as st
 from utils.csv_loader import find_csv_on_disk, load_from_uploaded_file, load_latest_backtest_csv
 from utils import shared_profile as profile
 from utils import ui
+from engines.tax_engine import effective_tax_rate, CGTLaw
 
 st.set_page_config(
     page_title="Australian Financial Planner",
@@ -171,9 +172,11 @@ _partnered = st.toggle(
 
 st.markdown("**🧑 You**")
 r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-_age           = r1c1.number_input("Current Age",         min_value=18, max_value=80,     step=1,    value=profile.get("pf_age"))
-_ret_age       = r1c2.number_input("Retirement Age",      min_value=40, max_value=100,    step=1,    value=profile.get("pf_retirement_age"))
-_birth_year    = r1c3.number_input("Birth Year",          min_value=1940, max_value=2006, step=1,    value=profile.get("pf_birth_year"))
+_age           = r1c1.number_input("Current Age",         min_value=18, max_value=80,  step=1, value=profile.get("pf_age"))
+_ret_age       = r1c2.number_input("Retirement Age",      min_value=40, max_value=100, step=1, value=profile.get("pf_retirement_age"))
+# Birth year is derived from age — always stays in sync.
+_birth_year    = 2026 - int(_age)
+r1c3.metric("Birth Year", _birth_year, help="Derived from your current age (2026 − age). Updates automatically.")
 _priv_cover    = r1c4.checkbox("Private Hospital Cover",  value=profile.get("pf_private_cover"))
 
 r2c1, r2c2, r2c3, r2c4 = st.columns(4)
@@ -233,6 +236,28 @@ if _show_ceiling:
              "becomes $205k nominal next year.",
     ))
 
+_p_salary_ceiling: float | None = None
+if _partnered:
+    pc1, pc2, pc3 = st.columns([1, 1, 2])
+    _p_show_ceiling = pc2.toggle(
+        "Set partner salary ceiling",
+        value=profile.get("pf_partner_salary_ceiling") is not None,
+        help="Optionally cap the partner's salary at a maximum in today's purchasing power. "
+             "Independent of your own salary ceiling.",
+    )
+    if _p_show_ceiling:
+        _p_ceil_default = int(
+            profile.get("pf_partner_salary_ceiling")
+            or max(int(_p_gross) * 2, int(_p_gross) + 50_000)
+        )
+        _p_salary_ceiling = float(pc3.number_input(
+            "Partner Salary Ceiling (Today's Dollars, AUD)",
+            min_value=0, step=10_000,
+            value=_p_ceil_default,
+            help="Maximum partner salary in today's purchasing power. "
+                 "Indexed to inflation each year.",
+        ))
+
 st.caption(
     "💡 Fill in your numbers, then click **Save Profile** — every calculator page will be pre-filled instantly."
 )
@@ -254,8 +279,9 @@ with btn_col:
         profile.set_value("pf_inflation",             float(_inflation))
         profile.set_value("pf_portfolio_return",      float(_port_return))
         profile.set_value("pf_swr",                   float(_swr))
-        profile.set_value("pf_salary_growth",         float(_salary_growth))
-        profile.set_value("pf_salary_ceiling",        _salary_ceiling)
+        profile.set_value("pf_salary_growth",           float(_salary_growth))
+        profile.set_value("pf_salary_ceiling",          _salary_ceiling)
+        profile.set_value("pf_partner_salary_ceiling",  _p_salary_ceiling)
         if _partnered:
             profile.set_value("pf_partner_age",           int(_p_age))
             profile.set_value("pf_partner_gross_income",  int(_p_gross))
@@ -275,17 +301,14 @@ with reset_col:
 # Show calculated outputs pushed back from tool pages
 ms  = profile.get("pf_monthly_savings")
 asp = profile.get("pf_annual_spending")
-nw  = profile.get("pf_net_worth")
 
-if ms is not None or asp is not None or nw is not None:
+if ms is not None or asp is not None:
     st.markdown("**Values calculated by your tools:**")
-    _pcols = st.columns(3)
+    _pcols = st.columns(2)
     if ms is not None:
         _pcols[0].metric("Monthly Savings", f"${ms:,.0f}",  help="From Budget & Savings Rate page")
     if asp is not None:
         _pcols[1].metric("Annual Spending",  f"${asp:,.0f}", help="From Budget & Savings Rate page")
-    if nw is not None:
-        _pcols[2].metric("Net Worth",        f"${nw:,.0f}",  help="From Net Wealth Calculator")
 
 st.divider()
 
@@ -302,9 +325,13 @@ _portfolio = profile.get("pf_portfolio") or 0
 _super     = profile.get("pf_super_balance") or 0
 _hecs      = profile.get("pf_hecs_balance") or 0
 
-# Rough after-tax income approximation (ignores HECS, MLS edge cases)
-_approx_net_annual = _gross * 0.72
-_savings_rate_est  = (ms * 12 / _approx_net_annual) if (ms is not None and _approx_net_annual > 0) else None
+# Precise after-tax income using the real tax engine (includes LITO, Medicare, HECS, MLS)
+_priv_cover   = profile.get("pf_private_cover") or False
+_net_annual   = effective_tax_rate(
+    _gross, 0, _hecs, 0, 0, CGTLaw.CURRENT,
+    has_private_hospital_cover=_priv_cover,
+)["net_income"]
+_savings_rate_est = (ms * 12 / _net_annual) if (ms is not None and _net_annual > 0) else None
 
 
 def _priority() -> tuple[int, str, str]:
@@ -323,11 +350,6 @@ def _priority() -> tuple[int, str, str]:
                 f"You're currently spending ${-ms:,.0f}/month more than you earn after tax. "
                 "No investment plan works without positive cashflow. Reduce discretionary expenses "
                 "or look for ways to increase income before anything else.")
-    if nw is None:
-        return (1,
-                "Map your full balance sheet",
-                "Run the Net Wealth Calculator to record your assets and liabilities, including "
-                "your emergency fund. You need to know where you stand before deciding what to do next.")
     if _savings_rate_est is not None and _savings_rate_est < 0.05:
         return (0,
                 "Savings rate is very low: revisit your budget",
@@ -464,10 +486,10 @@ with col_left:
 
     # Step 1: Emergency Fund
     _s1_status = ""
-    if nw is not None:
-        _s1_status = "✅ Net wealth calculated. Check your liquid cash vs. 1–3 months of expenses"
+    if ms is not None and ms > 0:
+        _s1_status = "→ Check your liquid cash vs. 1–3 months of your monthly expenses"
     elif profile.is_set():
-        _s1_status = "→ Run Net Wealth Calculator to record your emergency fund and full balance sheet"
+        _s1_status = "→ Run Budget & Savings first to find your monthly surplus and expense baseline"
 
     _step_card(
         1,
@@ -477,7 +499,7 @@ with col_left:
         "Keep it separate from your everyday account. Friction is a feature, not a bug.",
         "An emergency fund prevents you selling investments at the worst possible time. "
         "It is not an investment. It is financial insurance.",
-        "Net Wealth", "2",
+        "Budget & Savings", "1",
         _s1_status,
     )
 
@@ -489,7 +511,8 @@ with col_left:
     _step_card(
         2,
         "Capture Employer Super Contributions",
-        "Confirm your employer is paying the 11.5% Superannuation Guarantee (SG) into your chosen fund. "
+        "Confirm your employer is paying the 12% Superannuation Guarantee (SG) into your chosen fund "
+        "(12% from 1 July 2025). "
         "If they match voluntary salary sacrifice contributions, maximise that benefit before any other "
         "investing. It is an immediate, guaranteed return.",
         "Employer SG contributions are the single best guaranteed return available to you. "
@@ -513,7 +536,7 @@ with col_right:
         "Moderate debt (4.5–10%) can be run alongside investing. Run the numbers.",
         "A 19% credit card rate is a guaranteed -19% return. No investment consistently beats that. "
         "Paying off high-interest debt is the highest risk-adjusted return available to you.",
-        "Net Wealth", "2",
+        "Budget & Savings", "1",
         _s3_status,
     )
 

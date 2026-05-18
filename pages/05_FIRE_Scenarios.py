@@ -20,9 +20,37 @@ profile.init()
 st.title("🎯 FIRE Scenarios")
 st.caption("Step 6 of your journey: model different paths to financial independence. Compare strategies, DCA rates, and FIRE timelines side by side.")
 
-_pf_monthly_savings  = profile.get("pf_monthly_savings")
-_pf_annual_spending  = profile.get("pf_annual_spending")
-_default_dca         = int(_pf_monthly_savings) if _pf_monthly_savings is not None else 1_500
+_pf_monthly_savings     = profile.get("pf_monthly_savings")
+_pf_annual_spending     = profile.get("pf_annual_spending")
+_pf_investable_surplus  = profile.get("pf_monthly_investable_surplus")
+_pf_wants_purchase      = bool(profile.get("pf_wants_to_purchase"))
+
+# Mortgage data — read early so it can influence FIRE crossover calculations
+_pf_mortgage_monthly = profile.get("pf_mortgage_monthly")
+_pf_loan_term_years  = profile.get("pf_loan_term_years")
+_pf_purchase_yrs     = profile.get("pf_purchase_years_from_now")
+_pf_loan_amount      = profile.get("pf_mortgage_loan_amount")
+_pf_mortgage_rate    = profile.get("pf_mortgage_rate")
+_pf_property_value   = profile.get("pf_property_value")
+
+_has_mortgage_data = (
+    _pf_wants_purchase
+    and _pf_mortgage_monthly is not None
+    and _pf_loan_term_years  is not None
+    and _pf_loan_amount      is not None
+    and _pf_mortgage_rate    is not None
+)
+
+# When a property purchase is planned and the full investable surplus is known
+# (post-mortgage, post-living-expenses), use that as the DCA default. This gives a
+# realistic "how much can I actually invest each month after buying?" starting point.
+# Otherwise fall back to the Budget page monthly savings surplus.
+if _pf_wants_purchase and _pf_investable_surplus is not None:
+    _default_dca = max(int(_pf_investable_surplus), 0)
+elif _pf_monthly_savings is not None:
+    _default_dca = int(_pf_monthly_savings)
+else:
+    _default_dca = 1_500
 _default_spending    = int(_pf_annual_spending) if _pf_annual_spending is not None else 80_000
 _default_salary_growth = float(profile.get("pf_salary_growth") or 3.0)
 
@@ -56,7 +84,12 @@ with st.sidebar:
                                     help="Monthly investment amount. Pre-filled from your Budget page monthly savings surplus.")
     else:
         dca_value = st.number_input("Salary %", min_value=0.0, max_value=100.0, value=20.0)
-    if _pf_monthly_savings is not None:
+    if _pf_wants_purchase and _pf_investable_surplus is not None:
+        st.caption(
+            f"💡 From Home Deposit plan: **${max(int(_pf_investable_surplus), 0):,}/mo** "
+            f"investable surplus (after mortgage + living expenses) → used as DCA."
+        )
+    elif _pf_monthly_savings is not None:
         st.caption(f"💡 From Budget: **${int(_pf_monthly_savings):,}/mo** surplus → used as DCA.")
     dca_grows     = st.checkbox("DCA grows with salary", value=True)
     stop_at_coast = st.toggle("Stop DCA at Coast Year", value=False)
@@ -81,8 +114,26 @@ with st.sidebar:
     inflation_rate = st.slider("Inflation (%)", 0.0, 10.0, min(10.0, max(0.0, float(profile.get("pf_inflation")))), 0.1)
     horizon_years  = st.slider("Horizon (Years)", 5, 60, 35)
     st.divider()
+    st.header("📊 Return Assumption")
+    return_percentile = st.select_slider(
+        "Historical Return Percentile",
+        options=[10, 25, 50, 75, 90],
+        value=50,
+        help=(
+            "Selects which percentile of historical rolling-window CAGRs to use as the "
+            "forward return for each strategy. "
+            "50th = median (half of historical periods did better, half worse). "
+            "25th = conservative (only 1-in-4 historical periods were this poor). "
+            "Use 25th–50th for planning; 75th–90th to stress-test the upside."
+        ),
+    )
+    if return_percentile < 50:
+        st.caption(f"⚠️ Conservative view: {return_percentile}th percentile — only {return_percentile}% of historical windows were worse than this.")
+    elif return_percentile == 50:
+        st.caption("Base case: median historical return. ~50% of historical windows beat this.")
+    st.divider()
     st.header("🏦 Superannuation")
-    birth_year   = st.number_input("Birth Year", min_value=1940, max_value=2006, step=1, value=profile.get("pf_birth_year"))
+    birth_year   = st.number_input("Birth Year", min_value=1940, max_value=2010, step=1, value=profile.get("pf_birth_year"))
     _default_pres = preservation_age(birth_year)
     pres_age      = st.number_input(
         "Super Access Age",
@@ -99,9 +150,8 @@ with st.sidebar:
     super_return  = st.slider("Super Annual Return (%, nominal)", 3.0, 12.0, 7.0, 0.5,
                               help="Nominal return before inflation. App converts to real return internally.")
     sgc_rate      = st.slider(
-        "Super Contribution Rate (%)", 8.0, 30.0, 11.5, 0.5,
-        help="Employer SGC is 11.5% in 2024-25, rising to 12% from 1 July 2025. "
-             "Add voluntary contributions here too.",
+        "Super Contribution Rate (%)", 8.0, 30.0, 12.0, 0.5,
+        help="Employer SGC is 12% from 1 July 2025. Add voluntary contributions here too.",
     )
 
 result = load_latest_backtest_csv()
@@ -119,11 +169,38 @@ if not selected:
 proj_df = run_yearly_projection(
     data.cagr_df, selected, portfolio, dca_method, dca_value, dca_grows, stop_at_coast,
     salary_growth, salary, horizon_years, "Decimal (0.05 = 5%)", inflation_rate, True,
+    return_percentile=return_percentile,
 )
 
 lean_num    = lean_fire_target(lean_spending, swr)
 fat_num     = fat_fire_target(fat_spending, swr)
 barista_num = barista_fire_target(barista_spending, barista_income, swr)
+
+# ── Mortgage balance helper (available to both metrics and chart) ─────────────
+def _real_mort_balance(yr: int) -> float:
+    """Remaining mortgage in real (today's) AUD at projection year yr.
+
+    Returns 0 when there is no mortgage data, before purchase, or after payoff.
+    The nominal balance is deflated by cumulative inflation so it is comparable
+    with the portfolio values in proj_df (which are already in real AUD).
+    """
+    if not _has_mortgage_data:
+        return 0.0
+    _p_yr  = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
+    _po_yr = _p_yr + int(_pf_loan_term_years)
+    if yr < _p_yr or yr >= _po_yr:
+        return 0.0
+    months  = (yr - _p_yr) * 12
+    L       = float(_pf_loan_amount)
+    r       = float(_pf_mortgage_rate) / 12.0
+    pmt     = float(_pf_mortgage_monthly)
+    if r < 1e-10:
+        bal_nom = max(L - months * pmt, 0.0)
+    else:
+        fac     = (1.0 + r) ** months
+        bal_nom = max(L * fac - pmt * (fac - 1.0) / r, 0.0)
+    inf_ann = float(inflation_rate) / 100.0
+    return bal_nom / (1.0 + inf_ann) ** yr if yr > 0 else bal_nom
 
 bridge_cols = st.columns(4)
 
@@ -153,6 +230,30 @@ lean_age,    lean_strat    = _best_fire_age(lean_num_adj)
 median_age,  median_strat  = _best_fire_age(median_num_adj)
 fat_age,     fat_strat     = _best_fire_age(fat_num_adj)
 barista_age, barista_strat = _best_fire_age(barista_num_adj)
+
+# Mortgage-adjusted crossover: portfolio must also cover the remaining loan balance.
+# The effective target at year Y = FIRE_number + real_mortgage_balance(Y).
+# This threshold decreases year-by-year and hits the standard FIRE_number once paid off.
+def _best_mort_adj_fire_age(target: float) -> tuple[int | None, str | None]:
+    candidates = []
+    for s in selected:
+        col = f"{s}_Total"
+        if col not in proj_df.columns:
+            continue
+        for yr, port in enumerate(proj_df[col]):
+            if float(port) >= target + _real_mort_balance(yr):
+                candidates.append((current_age + yr, s))
+                break
+    if not candidates:
+        return None, None
+    return min(candidates, key=lambda x: x[0])
+
+if _has_mortgage_data:
+    median_age_adj, median_strat_adj = _best_mort_adj_fire_age(median_num_adj)
+    lean_age_adj,   _                = _best_mort_adj_fire_age(lean_num_adj)
+    fat_age_adj,    _                = _best_mort_adj_fire_age(fat_num_adj)
+else:
+    median_age_adj = median_strat_adj = lean_age_adj = fat_age_adj = None
 
 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
 with t_col1:
@@ -188,6 +289,57 @@ st.caption(
     f"{'age ' + str(median_age) if median_age else 'not in horizon'})."
 )
 
+if _has_mortgage_data:
+    _p_yr  = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
+    _po_yr = _p_yr + int(_pf_loan_term_years)
+
+    # Balance remaining at each candidate FIRE age
+    _bal_at_median = _real_mort_balance(median_age - current_age) if median_age else 0
+    _bal_at_lean   = _real_mort_balance(lean_age   - current_age) if lean_age   else 0
+    _bal_at_fat    = _real_mort_balance(fat_age    - current_age) if fat_age    else 0
+
+    _delay_med = (median_age_adj - median_age) if (median_age_adj and median_age) else None
+    _delay_lean = (lean_age_adj  - lean_age)   if (lean_age_adj   and lean_age)   else None
+    _delay_fat  = (fat_age_adj   - fat_age)    if (fat_age_adj    and fat_age)    else None
+
+    adj_a, adj_b, adj_c = st.columns(3)
+    adj_a.metric(
+        "Lean FIRE (Mortgage-Adjusted)",
+        f"Age {lean_age_adj}" if lean_age_adj else "Not in horizon",
+        delta=(f"+{_delay_lean} yr vs unadjusted" if (_delay_lean and _delay_lean > 0)
+               else ("No delay — mortgage paid before Lean FIRE" if _delay_lean == 0 else None)),
+        delta_color="inverse" if (_delay_lean and _delay_lean > 0) else "normal",
+        help=(f"Mortgage adds ${_bal_at_lean:,.0f} to the required portfolio at unadjusted Lean FIRE age ({lean_age})."
+              if lean_age else ""),
+    )
+    adj_b.metric(
+        "Your FIRE (Mortgage-Adjusted)",
+        f"Age {median_age_adj}" if median_age_adj else "Not in horizon",
+        delta=(f"+{_delay_med} yr vs unadjusted" if (_delay_med and _delay_med > 0)
+               else ("No delay — mortgage paid before FIRE" if _delay_med == 0 else None)),
+        delta_color="inverse" if (_delay_med and _delay_med > 0) else "normal",
+        help=(f"At unadjusted FIRE age ({median_age}), ${_bal_at_median:,.0f} mortgage balance "
+              f"still outstanding. Portfolio must be ${median_num_adj + _bal_at_median:,.0f} "
+              f"(= ${median_num_adj:,.0f} FIRE number + ${_bal_at_median:,.0f} mortgage) "
+              f"before you can truly retire."
+              if median_age else ""),
+    )
+    adj_c.metric(
+        "Fat FIRE (Mortgage-Adjusted)",
+        f"Age {fat_age_adj}" if fat_age_adj else "Not in horizon",
+        delta=(f"+{_delay_fat} yr vs unadjusted" if (_delay_fat and _delay_fat > 0)
+               else ("No delay — mortgage paid before Fat FIRE" if _delay_fat == 0 else None)),
+        delta_color="inverse" if (_delay_fat and _delay_fat > 0) else "normal",
+        help=(f"Mortgage adds ${_bal_at_fat:,.0f} to the required portfolio at unadjusted Fat FIRE age ({fat_age})."
+              if fat_age else ""),
+    )
+    st.caption(
+        f"🏠 **How mortgage-adjusted FIRE works:** your portfolio must cover **both** the SWR-based "
+        f"spending number and the remaining loan balance at the point of retirement. "
+        f"The required threshold decreases each year as the mortgage is paid down, "
+        f"reaching the standard FIRE number at mortgage payoff (age {current_age + _po_yr})."
+    )
+
 st.divider()
 st.subheader("The Double Crossover")
 fig = go.Figure()
@@ -199,6 +351,17 @@ fig.add_trace(go.Scatter(x=ages, y=proj_df["Salary"], name="Annual Salary",
 fig.add_trace(go.Scatter(x=ages, y=proj_df["Yearly_DCA"], name="Annual DCA",
                           line=dict(color=COLORS["soft_yellow"], width=2, dash="dot"),
                           hovertemplate="DCA: $%{y:,.0f}<extra></extra>"))
+
+# Mortgage-adjusted FIRE target: a line that starts at FIRE_number + full_loan_balance
+# and decreases year-by-year to FIRE_number once the mortgage is paid off.
+if _has_mortgage_data:
+    _adj_targets = [median_num_adj + _real_mort_balance(yr) for yr in range(len(proj_df))]
+    fig.add_trace(go.Scatter(
+        x=ages, y=_adj_targets,
+        name="Mortgage-Adjusted FIRE Target",
+        line=dict(color=COLORS["red"], width=2, dash="dot"),
+        hovertemplate="Mortgage-Adj. Target: $%{y:,.0f}<extra></extra>",
+    ))
 
 for i, strat in enumerate(selected):
     color = STRATEGY_COLORS[i % len(STRATEGY_COLORS)]
@@ -222,7 +385,7 @@ for i, strat in enumerate(selected):
         fig.add_annotation(
             x=dca_yr + current_age,
             y=float(profit.iloc[dca_yr]),
-            text=f"Coast {strat[:8]} yr {dca_yr}",
+            text=f"Contrib X-over {strat[:8]} yr {dca_yr}",
             showarrow=True, arrowhead=2,
             ax=-abs(ax_step), ay=ay_step,
             bgcolor=COLORS["blue"], font=dict(color=COLORS["dark"], size=10),
@@ -257,7 +420,7 @@ with st.expander("📖 How to read the Double Crossover chart"):
 
 | Crossover | What it means |
 |-----------|---------------|
-| **Annual Profit > Annual DCA** (Coast point) | Your portfolio's yearly growth exceeds what you're contributing. You could stop investing and still reach FIRE. |
+| **Annual Profit > Annual DCA** (Contribution Crossover) | Your portfolio's yearly growth exceeds what you're contributing. A momentum milestone — note this is not the same as Coast FIRE (which requires the current balance to compound to your full FIRE number by retirement with no further contributions). |
 | **Annual Profit > Annual Salary** (FI point) | Your portfolio generates more each year than your job does. You are financially independent. |
 
 **Reading the lines:**
@@ -329,8 +492,17 @@ sc2.metric(
 )
 
 super_swr_income = super_at_pres * swr
-sc3.metric("Super SWR Income", f"${super_swr_income:,.0f}/yr",
-           help=f"Annual income from super at {swr*100:.1f}% SWR from age {pres_age}")
+sc3.metric(
+    "Super SWR Income (Tax-Free)", f"${super_swr_income:,.0f}/yr",
+    help=(
+        f"Annual income from super at {swr*100:.1f}% SWR from age {pres_age}. "
+        f"Super withdrawals are tax-free in pension phase (after age 60). "
+        f"This ${super_swr_income:,.0f}/yr is directly comparable to after-tax spending — "
+        f"it is NOT a gross amount requiring further tax deduction. "
+        f"In contrast, the FIRE numbers above show the gross portfolio withdrawal needed to yield "
+        f"a target after-tax spend from a non-super portfolio."
+    ),
+)
 
 # Bridge period: years between earliest FI and super access
 best_sal_yr = min((salary_crossover_year(proj_df, s) for s in selected if salary_crossover_year(proj_df, s)), default=None)
@@ -688,17 +860,10 @@ mc3.metric(
 # Log scale can't plot 0, clamp depleted values to $1 so the line stays visible.
 _log_floor = lambda vals: [max(v, 1.0) for v in vals]
 
-# Compute a data-driven log y-axis range so we don't silently clip portfolios that
-# sit below $100k or grow above $10M. We anchor the lower bound at $1,000 so a
-# depleting line drops clearly through visible territory before vanishing.
 _all_bucket_vals = [v for v in (ns_A + total_A + total_B + ns_C + total_C) if v > 0]
-if _all_bucket_vals:
-    _data_min = max(min(_all_bucket_vals), 1.0)
-    _data_max = max(_all_bucket_vals)
-    _y_log_lo = math.log10(max(min(_data_min, 1_000.0), 1.0))
-    _y_log_hi = math.log10(_data_max * 1.25)
-else:
-    _y_log_lo, _y_log_hi = 3.0, 7.0
+_data_max = max(_all_bucket_vals) if _all_bucket_vals else 10_000_000
+_y_log_lo = math.log10(100_000)
+_y_log_hi = math.log10(_data_max * 1.25)
 
 fig_buckets = go.Figure()
 
@@ -891,4 +1056,236 @@ than an infinite-horizon SWR portfolio. The trade-off: less super at preservatio
 """)
 
 
-st.warning("⚠️ Projections use median historical CAGR. Not a guarantee of future performance.")
+st.divider()
+
+# ── Property & Mortgage Paydown ───────────────────────────────────────────────
+_pf_mortgage_monthly = profile.get("pf_mortgage_monthly")
+_pf_loan_term_years  = profile.get("pf_loan_term_years")
+_pf_purchase_yrs     = profile.get("pf_purchase_years_from_now")
+_pf_loan_amount      = profile.get("pf_mortgage_loan_amount")
+_pf_mortgage_rate    = profile.get("pf_mortgage_rate")
+_pf_property_value   = profile.get("pf_property_value")
+
+if _has_mortgage_data:
+    st.subheader("🏠 Property, Mortgage Paydown & Total Net Worth")
+    st.caption(
+        "Tracks remaining mortgage balance year-by-year (in today's real AUD), home equity as the "
+        "property appreciates, and your combined net worth (investment portfolio + home equity)."
+    )
+
+    _prop_app_col, _, _ = st.columns(3)
+    with _prop_app_col:
+        prop_app_rate = st.slider(
+            "Property Appreciation (%/yr)", 0.0, 12.0, 4.0, 0.25,
+            key="fire_prop_app_rate",
+            help="Annual nominal growth rate for the property value after purchase.",
+        ) / 100.0
+
+    mort_monthly         = float(_pf_mortgage_monthly)
+    loan_term_yrs        = int(_pf_loan_term_years)
+    purchase_yr          = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
+    loan_amount          = float(_pf_loan_amount)
+    ann_rate             = float(_pf_mortgage_rate)
+    prop_val_at_purchase = float(_pf_property_value) if _pf_property_value else loan_amount / 0.80
+    monthly_rate         = ann_rate / 12.0
+    payoff_yr            = purchase_yr + loan_term_yrs
+    payoff_age           = current_age + payoff_yr
+    _ann_mortgage        = mort_monthly * 12.0
+    _inf_mult            = 1.0 + inf_r
+
+    # ── Amortization helper (nominal $) ─────────────────────────────────────
+    def _mort_balance_nom(months_since_purchase: int) -> float:
+        """Remaining P&I loan balance (nominal $) after N months of repayments."""
+        if months_since_purchase <= 0:
+            return loan_amount
+        n = float(months_since_purchase)
+        if monthly_rate < 1e-10:
+            return max(loan_amount - n * mort_monthly, 0.0)
+        factor = (1.0 + monthly_rate) ** n
+        return max(loan_amount * factor - mort_monthly * (factor - 1.0) / monthly_rate, 0.0)
+
+    # ── Year-by-year schedule ────────────────────────────────────────────────
+    horizon_yrs_list = list(range(horizon_years + 1))
+    ages_hw          = [current_age + y for y in horizon_yrs_list]
+
+    mort_bal_nom:  list[float | None] = []
+    mort_bal_real: list[float | None] = []
+    prop_val_real: list[float]        = []
+    equity_real:   list[float]        = []
+
+    for yr in horizon_yrs_list:
+        if yr < purchase_yr:
+            mort_bal_nom.append(None)
+            mort_bal_real.append(None)
+            prop_val_real.append(0.0)
+            equity_real.append(0.0)
+        else:
+            years_owned = yr - purchase_yr
+            months_paid = years_owned * 12
+            bal_nom  = _mort_balance_nom(months_paid)
+            # Deflate nominal balance to today's real AUD
+            bal_real = bal_nom / (_inf_mult ** yr)
+            # Property value: nominal appreciation from purchase date, then deflated
+            pv_nom   = prop_val_at_purchase * (1.0 + prop_app_rate) ** years_owned
+            pv_real  = pv_nom / (_inf_mult ** yr)
+            eq_real  = max(pv_real - bal_real, 0.0)
+            mort_bal_nom.append(bal_nom)
+            mort_bal_real.append(bal_real)
+            prop_val_real.append(pv_real)
+            equity_real.append(eq_real)
+
+    # Portfolio (real) from best median strategy
+    _best_col = (
+        f"{median_strat}_Total"
+        if (median_strat and f"{median_strat}_Total" in proj_df.columns)
+        else f"{selected[0]}_Total"
+    )
+    port_vals_real = [
+        float(proj_df[_best_col].iloc[min(yr, len(proj_df) - 1)])
+        if _best_col in proj_df.columns else 0.0
+        for yr in horizon_yrs_list
+    ]
+    total_nw_real = [p + e for p, e in zip(port_vals_real, equity_real)]
+
+    # ── Metrics row ──────────────────────────────────────────────────────────
+    nm1, nm2, nm3, nm4 = st.columns(4)
+    nm1.metric(
+        "Purchase Year",
+        f"Year {purchase_yr}",
+        f"Age {current_age + purchase_yr}",
+    )
+    nm2.metric(
+        "Mortgage Paid Off",
+        f"Age {payoff_age}" if payoff_yr <= horizon_years else "Beyond horizon",
+        f"Year {payoff_yr}" if payoff_yr <= horizon_years
+        else f"({payoff_yr - horizon_years} yrs past horizon)",
+    )
+    nm3.metric(
+        "DCA Boost at Payoff",
+        f"${mort_monthly:,.0f}/mo",
+        f"+${_ann_mortgage:,.0f}/yr freed up",
+        help="Once the mortgage is gone, this repayment amount is available to redirect into investments.",
+    )
+    _payoff_equity = equity_real[min(payoff_yr, horizon_years)] if payoff_yr <= horizon_years else equity_real[-1]
+    nm4.metric(
+        "Home Equity at Payoff (Real)",
+        f"${_payoff_equity:,.0f}",
+        help="Property value minus zero remaining balance, in today's purchasing power.",
+    )
+
+    # ── FIRE spending note ────────────────────────────────────────────────────
+    if median_age is not None:
+        if payoff_age <= median_age:
+            st.success(
+                f"✅ **Mortgage fully paid at age {payoff_age}** — {median_age - payoff_age} year(s) "
+                f"**before** your FIRE target (age {median_age}). Your spending target of "
+                f"**${median_spending:,}/yr** does not need to include the ${_ann_mortgage:,.0f}/yr "
+                f"repayment. At payoff, you gain **${mort_monthly:,.0f}/mo** extra to invest."
+            )
+        else:
+            st.warning(
+                f"⚠️ **At your FIRE date (age {median_age}), your mortgage has "
+                f"{payoff_age - median_age} years remaining** (${mort_monthly:,.0f}/mo = "
+                f"${_ann_mortgage:,.0f}/yr). Your FIRE spending target should include this "
+                f"repayment until age {payoff_age}, then drops by ${_ann_mortgage:,.0f}/yr "
+                f"when the mortgage is fully paid off."
+            )
+
+    # ── Chart ─────────────────────────────────────────────────────────────────
+    fig_prop = go.Figure()
+
+    # Home equity fill
+    _eq_ages = [ages_hw[i] for i, e in enumerate(equity_real) if e > 0]
+    _eq_vals = [e for e in equity_real if e > 0]
+    if _eq_ages:
+        fig_prop.add_trace(go.Scatter(
+            x=_eq_ages, y=_eq_vals,
+            name="Home Equity (Real AUD)", fill="tozeroy",
+            line=dict(color=COLORS["mint"], width=2),
+            fillcolor="rgba(78,154,114,0.15)",
+            hovertemplate="Age %{x}<br>Home Equity: $%{y:,.0f}<extra></extra>",
+        ))
+
+    # Remaining mortgage balance (real)
+    _mb_ages = [ages_hw[i] for i, b in enumerate(mort_bal_real) if b is not None]
+    _mb_vals = [b for b in mort_bal_real if b is not None]
+    if _mb_ages:
+        fig_prop.add_trace(go.Scatter(
+            x=_mb_ages, y=_mb_vals,
+            name="Remaining Mortgage (Real AUD)", fill="tozeroy",
+            line=dict(color=COLORS["red"], width=2, dash="dot"),
+            fillcolor="rgba(168,72,72,0.10)",
+            hovertemplate="Age %{x}<br>Mortgage Balance: $%{y:,.0f}<extra></extra>",
+        ))
+
+    # Investment portfolio
+    fig_prop.add_trace(go.Scatter(
+        x=ages_hw, y=port_vals_real,
+        name=f"Investment Portfolio ({median_strat or selected[0]}, Real)",
+        line=dict(color=COLORS["blue"], width=2),
+        hovertemplate="Age %{x}<br>Portfolio: $%{y:,.0f}<extra></extra>",
+    ))
+
+    # Total net worth
+    fig_prop.add_trace(go.Scatter(
+        x=ages_hw, y=total_nw_real,
+        name="Total Net Worth (Portfolio + Equity, Real)",
+        line=dict(color=COLORS["purple"], width=3),
+        hovertemplate="Age %{x}<br>Total NW: $%{y:,.0f}<extra></extra>",
+    ))
+
+    # Vertical lines
+    _buy_age = current_age + purchase_yr
+    if purchase_yr <= horizon_years:
+        fig_prop.add_vline(
+            x=_buy_age, line_color=COLORS["yellow"], line_dash="dash", line_width=2,
+            annotation_text=f"🏠 Purchase (age {_buy_age})",
+            annotation_font_color=COLORS["yellow"], annotation_position="top left",
+        )
+    if payoff_yr <= horizon_years:
+        fig_prop.add_vline(
+            x=payoff_age, line_color=COLORS["green"], line_dash="dash", line_width=2,
+            annotation_text=f"✅ Mortgage paid off (age {payoff_age})",
+            annotation_font_color=COLORS["green"], annotation_position="top right",
+        )
+    if median_age and current_age <= median_age <= current_age + horizon_years:
+        fig_prop.add_vline(
+            x=median_age, line_color=COLORS["orange"], line_dash="dot", line_width=2,
+            annotation_text=f"🎯 FIRE (age {median_age})",
+            annotation_font_color=COLORS["orange"], annotation_position="top right",
+        )
+
+    fig_prop.update_layout(
+        **CHART_LAYOUT,
+        xaxis=dict(title="Age", dtick=5),
+        yaxis=dict(tickformat="$.3s", title="Value (Real AUD — today's purchasing power)"),
+        hovermode="x unified", height=480,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig_prop, width="stretch")
+
+    # ── Year-by-year schedule table ───────────────────────────────────────────
+    with st.expander("📋 Year-by-Year Mortgage & Net Worth Schedule"):
+        _sched_rows = []
+        for yr in horizon_yrs_list:
+            if yr < purchase_yr:
+                continue
+            _sched_rows.append({
+                "Year": yr,
+                "Age":  current_age + yr,
+                "Mortgage Balance (Nominal $)": f"${mort_bal_nom[yr]:,.0f}" if mort_bal_nom[yr] is not None else "—",
+                "Mortgage Balance (Real $)":    f"${mort_bal_real[yr]:,.0f}" if mort_bal_real[yr] is not None else "—",
+                "Property Value (Real $)":      f"${prop_val_real[yr]:,.0f}",
+                "Home Equity (Real $)":         f"${equity_real[yr]:,.0f}",
+                "Investment Portfolio (Real $)": f"${port_vals_real[yr]:,.0f}",
+                "Total Net Worth (Real $)":     f"${total_nw_real[yr]:,.0f}",
+            })
+        if _sched_rows:
+            st.dataframe(pd.DataFrame(_sched_rows).set_index("Year"), use_container_width=True)
+
+_pct_label = {10: "10th (very conservative)", 25: "25th (conservative)", 50: "50th (median)", 75: "75th (optimistic)", 90: "90th (very optimistic)"}.get(return_percentile, f"{return_percentile}th")
+st.warning(
+    f"⚠️ Projections use the **{_pct_label} percentile** of historical rolling-window CAGRs from backtest data. "
+    f"~{return_percentile}% of historical windows produced returns at or below this level. "
+    f"Not a guarantee of future performance."
+)

@@ -23,7 +23,7 @@ PROFILE_DEFAULTS: dict[str, object] = {
     # Personal (you)
     "pf_age":              30,
     "pf_retirement_age":   65,
-    "pf_birth_year":       1995,
+    "pf_birth_year":       1996,  # 2026 - 30 (default age)
     # Income (you)
     "pf_gross_income":     110_000,
     "pf_hecs_balance":     20_000,
@@ -44,10 +44,20 @@ PROFILE_DEFAULTS: dict[str, object] = {
     "pf_swr":              4.0,      # % safe withdrawal rate
     "pf_salary_growth":    3.0,      # % per year, nominal salary growth rate
     "pf_salary_ceiling":   None,     # max salary in today's $; None = no cap
+    "pf_partner_salary_ceiling": None,  # max partner salary in today's $; None = no cap
+    # House purchase (set by Home Deposit page)
+    "pf_wants_to_purchase":      False,
+    "pf_property_value":         None,  # nominal property price at purchase date
+    "pf_mortgage_loan_amount":   None,  # loan amount at purchase
+    "pf_mortgage_monthly":       None,  # monthly P&I repayment
+    "pf_mortgage_rate":          None,  # interest rate (decimal)
+    "pf_loan_term_years":        None,  # loan term in years
+    "pf_purchase_years_from_now": None, # years until purchase
     # Calculated outputs (set by calculator pages)
-    "pf_monthly_savings":  None,     # set by Budget page
-    "pf_annual_spending":  None,     # set by Budget page
-    "pf_net_worth":        None,     # set by Net Wealth page
+    "pf_monthly_savings":           None,  # set by Budget page
+    "pf_annual_spending":           None,  # set by Budget page
+    "pf_current_housing_cost":      None,  # rent/mortgage from Budget page
+    "pf_monthly_investable_surplus": None, # post-mortgage, post-living-expenses surplus (Home Deposit page)
 }
 
 
@@ -177,14 +187,11 @@ def sidebar_summary() -> None:
             )
 
         ms  = get("pf_monthly_savings")
-        nw  = get("pf_net_worth")
         asp = get("pf_annual_spending")
         if ms is not None:
             st.metric("Monthly Savings", f"${ms:,.0f}", help="From Budget page")
         if asp is not None:
             st.metric("Annual Spending", f"${asp:,.0f}", help="From Budget page")
-        if nw is not None:
-            st.metric("Net Worth", f"${nw:,.0f}", help="From Net Wealth page")
 
         if not is_set():
             st.info("💡 Go to the **Home** page to set your profile.")

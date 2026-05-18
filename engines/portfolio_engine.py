@@ -116,10 +116,14 @@ def run_yearly_projection(
     return_format: str,
     inflation_rate: float,
     adjust_inflation: bool,
+    return_percentile: int = 50,
 ) -> pd.DataFrame:
     """
     Year-by-year portfolio projection for multiple strategies.
-    Uses median historical CAGR from each strategy column.
+
+    return_percentile selects which percentile of the historical CAGR distribution to use
+    as the forward return for each strategy (default 50 = median).
+    Use 25 for conservative planning, 75 for optimistic stress-testing.
     """
     is_percentage = "Percentage" in return_format
     strategy_returns: dict[str, float] = {}
@@ -127,7 +131,8 @@ def run_yearly_projection(
         rets = pd.to_numeric(df[strat], errors="coerce").dropna()
         if is_percentage:
             rets = rets / 100.0
-        strategy_returns[strat] = float(rets.median())
+        arr = rets.to_numpy(dtype=float)
+        strategy_returns[strat] = float(np.percentile(arr, return_percentile)) if len(arr) else 0.0
 
     projection_data: list[dict] = []
     current_portfolios = {s: float(initial_portfolio) for s in strategy_cols}

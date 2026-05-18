@@ -13,18 +13,12 @@ profile.init()
 st.title("💸 Retirement Drawdown")
 st.caption("Step 6 of your journey: stress-test your retirement income. Model safe withdrawal rates, inflation, and portfolio depletion risk.")
 
-# Default portfolio defaults to household net worth when available; otherwise
-# fall back to (portfolio + household super) so couples don't see a tiny solo
-# default that ignores their partner's super.
+# Default portfolio = (investable portfolio + household super) from profile.
 _partnered     = profile.is_partnered()
-_pf_net_worth  = profile.get("pf_net_worth")
-if _pf_net_worth is not None:
-    _default_portf = int(_pf_net_worth)
-else:
-    _default_portf = int((profile.get("pf_portfolio") or 0)
-                         + profile.household_super_balance())
-    if _default_portf <= 0:
-        _default_portf = 1_500_000
+_default_portf = int((profile.get("pf_portfolio") or 0)
+                     + profile.household_super_balance())
+if _default_portf <= 0:
+    _default_portf = 1_500_000
 _pf_asp         = profile.get("pf_annual_spending")
 _default_withdraw = int(_pf_asp) if _pf_asp is not None else 80_000
 
@@ -178,17 +172,38 @@ The chart shows balances in today's dollars. The real return (nominal minus infl
 
 st.divider()
 st.subheader("Strategy-Specific Depletion Comparison")
+
+import pandas as pd
+import numpy as np
+
+_pct_opts = [10, 25, 50, 75, 90]
+_dep_pct = st.select_slider(
+    "Backtest percentile for comparison table",
+    options=_pct_opts,
+    value=50,
+    help=(
+        "Which percentile of historical rolling-window CAGRs to use as the return "
+        "assumption in the per-strategy depletion table. 50 = median. "
+        "25 = conservative (only 1-in-4 historical windows were this poor). "
+        "The main chart above uses your manual return slider."
+    ),
+)
 strategy_dep_data = []
 for strat in data.strategies:
-    median_return = float(data.cagr_df[strat].median())
-    dep = depletion_year(portfolio, annual_withdrawal, median_return, inflation_rate, max_years)
+    arr = pd.to_numeric(data.cagr_df[strat], errors="coerce").dropna().to_numpy(dtype=float)
+    pct_return = float(np.percentile(arr, _dep_pct)) if len(arr) else 0.0
+    dep = depletion_year(portfolio, annual_withdrawal, pct_return, inflation_rate, max_years)
     strategy_dep_data.append({
         "Strategy": strat,
-        "Median Return (%)": f"{median_return*100:.1f}%",
+        f"Return ({_dep_pct}th pct, %)": f"{pct_return*100:.1f}%",
         "Depletion Year": dep if dep else f">{max_years}",
     })
-import pandas as pd
 dep_df = pd.DataFrame(strategy_dep_data).set_index("Strategy")
 st.dataframe(dep_df, width='stretch')
 
-st.caption("⚠️ Values in real AUD (today's purchasing power). Nominal returns converted to real returns internally. Uses median historical CAGR from backtest data.")
+_dep_pct_label = {10: "10th (very conservative)", 25: "25th (conservative)", 50: "50th (median)", 75: "75th (optimistic)", 90: "90th (very optimistic)"}.get(_dep_pct, f"{_dep_pct}th")
+st.caption(
+    f"⚠️ Comparison table uses the **{_dep_pct_label} percentile** of historical rolling-window CAGRs. "
+    f"~{_dep_pct}% of historical periods produced returns at or below this level. "
+    f"Values in real AUD. Nominal returns converted to real returns internally."
+)

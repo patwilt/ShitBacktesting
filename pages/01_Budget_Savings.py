@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from engines.tax_engine import effective_tax_rate, CGTLaw
+from engines.calculation_engine import preservation_age
 from utils.colors import COLORS, CHART_LAYOUT, CHART_BG
 from utils import shared_profile as profile
 
@@ -22,6 +23,53 @@ st.caption(
 
 _partnered = profile.is_partnered()
 
+# ── Persistent local state (survives page navigation) ─────────────────────────
+# Streamlit purges widget-bound `key=` values when you navigate away from a page.
+# We store mutable page-local values in plain non-widget session-state dicts that
+# Streamlit never cleans up.  Profile-backed fields (income, HECS, etc.) are NOT
+# stored here — they re-read from the profile on every visit so cross-page edits
+# always flow in.
+_pf_mortgage_monthly = profile.get("pf_mortgage_monthly")
+_pf_wants_purchase   = bool(profile.get("pf_wants_to_purchase"))
+_mortgage_default    = int(_pf_mortgage_monthly) if (_pf_wants_purchase and _pf_mortgage_monthly is not None) else 2_200
+
+if "bs_expenses" not in st.session_state:
+    st.session_state["bs_expenses"] = {
+        "rent_mortgage":  _mortgage_default,
+        "utilities":      250,
+        "insurance":      200,
+        "phone":          100,
+        "transport_fixed": 400,
+        "other_fixed":    150,
+        "groceries":      600,
+        "dining_out":     400,
+        "entertainment":  300,
+        "clothing":       150,
+        "health":         100,
+        "travel":         300,
+        "gifts_misc":     100,
+    }
+
+if "bs_sidebar" not in st.session_state:
+    st.session_state["bs_sidebar"] = {
+        "bonus_income":       5_000,
+        "super_contribs":     15_000,
+        "p_bonus_income":     0,
+        "p_super_contribs":   int(profile.get("pf_partner_gross_income") * 0.12),
+        "income_growth":      3.0,
+        "annual_super_addition": 15_000,
+    }
+
+_e = st.session_state["bs_expenses"]
+_s = st.session_state["bs_sidebar"]
+
+# Sync rent/mortgage when the profile mortgage changes (e.g. after a Home Deposit export)
+_last_seen_mortgage = st.session_state.get("_last_pf_mortgage_seen")
+if _pf_wants_purchase and _pf_mortgage_monthly is not None:
+    if _last_seen_mortgage != _pf_mortgage_monthly:
+        _e["rent_mortgage"] = int(_pf_mortgage_monthly)
+        st.session_state["_last_pf_mortgage_seen"] = _pf_mortgage_monthly
+
 # ── Sidebar: income ───────────────────────────────────────────────────────────
 with st.sidebar:
     profile.sidebar_summary()
@@ -33,9 +81,11 @@ with st.sidebar:
 
     st.markdown("**🧑 You**")
     gross_income   = st.number_input("Gross Annual Salary (AUD)", min_value=0, step=5_000, value=profile.get("pf_gross_income"))
-    bonus_income   = st.number_input("Annual Bonus / Side Income", min_value=0, value=5_000, step=1_000)
-    super_contribs = st.number_input("Super Contributions/yr", min_value=0, value=15_000, step=1_000,
+    bonus_income   = st.number_input("Annual Bonus / Side Income", min_value=0, value=_s["bonus_income"], step=1_000)
+    _s["bonus_income"] = bonus_income
+    super_contribs = st.number_input("Super Contributions/yr", min_value=0, value=_s["super_contribs"], step=1_000,
                                      help="Employer SG + any salary sacrifice")
+    _s["super_contribs"] = super_contribs
     hecs_balance   = st.number_input("HECS-HELP Balance", min_value=0, value=profile.get("pf_hecs_balance"), step=1_000)
     private_cover  = st.checkbox("Private Hospital Cover", value=profile.get("pf_private_cover"))
 
@@ -43,11 +93,13 @@ with st.sidebar:
         st.divider()
         st.markdown("**🧑‍🤝‍🧑 Your Partner**")
         p_gross_income   = st.number_input("Partner Gross Salary (AUD)", min_value=0, step=5_000, value=profile.get("pf_partner_gross_income"))
-        p_bonus_income   = st.number_input("Partner Bonus / Side", min_value=0, value=0, step=1_000)
+        p_bonus_income   = st.number_input("Partner Bonus / Side", min_value=0, value=_s["p_bonus_income"], step=1_000)
+        _s["p_bonus_income"] = p_bonus_income
         p_super_contribs = st.number_input("Partner Super Contributions/yr", min_value=0,
-                                           value=int(profile.get("pf_partner_gross_income") * 0.115),
+                                           value=_s["p_super_contribs"],
                                            step=1_000,
                                            help="Defaults to 11.5% SG of partner salary. Add salary sacrifice if applicable.")
+        _s["p_super_contribs"] = p_super_contribs
         p_hecs_balance   = st.number_input("Partner HECS-HELP Balance", min_value=0, value=profile.get("pf_partner_hecs_balance"), step=1_000)
         p_private_cover  = st.checkbox("Partner Private Hospital Cover", value=profile.get("pf_partner_private_cover"))
     else:
@@ -59,17 +111,28 @@ with st.sidebar:
     # Clamp profile values to slider ranges to avoid out-of-range errors
     inflation_rate   = st.slider("Inflation (%/yr)",         0.0, 8.0,  min(8.0,  max(0.0,  float(profile.get("pf_inflation")))),        0.25) / 100.0
     portfolio_return = st.slider("Portfolio Return (%/yr)",  0.0, 15.0, min(15.0, max(0.0,  float(profile.get("pf_portfolio_return")))), 0.25) / 100.0
-    income_growth    = st.slider("Annual Income Growth (%)", 0.0, 10.0, 3.0, 0.25) / 100.0
+    income_growth    = st.slider("Annual Income Growth (%)", 0.0, 10.0, _s["income_growth"], 0.25) / 100.0
+    _s["income_growth"] = income_growth * 100
     swr              = st.slider("Safe Withdrawal Rate (%)", 2.0, 6.0,  min(6.0,  max(2.0,  float(profile.get("pf_swr")))),              0.25) / 100.0
 
     st.divider()
     st.header("🏦 Existing Wealth")
-    existing_portfolio    = st.number_input("Existing Investment Portfolio ($)", min_value=0, value=profile.get("pf_portfolio"),     step=5_000)
-    existing_super        = st.number_input("Existing Super Balance ($)",        min_value=0, value=profile.get("pf_super_balance"), step=5_000)
+    existing_portfolio = st.number_input("Existing Investment Portfolio ($)", min_value=0, value=profile.get("pf_portfolio"), step=5_000)
+    _super_label       = "Household Super Balance ($)" if _partnered else "Your Super Balance ($)"
+    _super_default     = profile.household_super_balance() if _partnered else profile.get("pf_super_balance")
+    existing_super     = st.number_input(_super_label, min_value=0, value=int(_super_default), step=5_000,
+                                         help="Combined super across both partners." if _partnered else None)
+    if _partnered:
+        st.caption(
+            f"🧑 You: ${profile.get('pf_super_balance'):,.0f}  ·  "
+            f"🧑‍🤝‍🧑 Partner: ${profile.get('pf_partner_super_balance'):,.0f}  ·  "
+            f"Combined: ${profile.household_super_balance():,.0f}"
+        )
     annual_super_addition = st.number_input(
-        "Total Super Contributions/yr ($)", min_value=0, value=super_contribs, step=1_000,
-        help="Employer SG + salary sacrifice. Used in FIRE timeline to project super balance alongside portfolio.",
+        "Total Super Contributions/yr ($)", min_value=0, value=_s["annual_super_addition"], step=1_000,
+        help="Employer SG + salary sacrifice for the household. Used in FIRE timeline to project super balance alongside portfolio.",
     )
+    _s["annual_super_addition"] = annual_super_addition
 
 # ── Tax calculation ───────────────────────────────────────────────────────────
 # Australian income tax is individual. For couples we run effective_tax_rate
@@ -102,22 +165,39 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("**Fixed Expenses**")
-    rent_mortgage   = st.number_input("Rent / Mortgage ($)",    min_value=0, value=2_200, step=100)
-    utilities       = st.number_input("Utilities (elec/gas/internet)", min_value=0, value=250, step=25)
-    insurance       = st.number_input("Insurance (all policies)", min_value=0, value=200, step=25)
-    phone           = st.number_input("Phone / Subscriptions",  min_value=0, value=100, step=10)
-    transport_fixed = st.number_input("Transport (loan/rego/fuel)", min_value=0, value=400, step=50)
-    other_fixed     = st.number_input("Other Fixed ($)",         min_value=0, value=150, step=25)
+    rent_mortgage = st.number_input("Rent / Mortgage ($)", min_value=0, value=_e["rent_mortgage"], step=100)
+    _e["rent_mortgage"] = rent_mortgage
+    if _pf_wants_purchase and _pf_mortgage_monthly is not None:
+        _purchase_yrs = profile.get("pf_purchase_years_from_now")
+        _yr_note = f" (planned in ~{int(_purchase_yrs)} yr(s))" if _purchase_yrs else ""
+        st.caption(f"💡 Pre-filled from your Home Deposit plan — planned mortgage of ${int(_pf_mortgage_monthly):,}/mo{_yr_note}.")
+    utilities       = st.number_input("Utilities (elec/gas/internet)", min_value=0, value=_e["utilities"],      step=25)
+    _e["utilities"] = utilities
+    insurance       = st.number_input("Insurance (all policies)",       min_value=0, value=_e["insurance"],     step=25)
+    _e["insurance"] = insurance
+    phone           = st.number_input("Phone / Subscriptions",          min_value=0, value=_e["phone"],         step=10)
+    _e["phone"] = phone
+    transport_fixed = st.number_input("Transport (loan/rego/fuel)",     min_value=0, value=_e["transport_fixed"], step=50)
+    _e["transport_fixed"] = transport_fixed
+    other_fixed     = st.number_input("Other Fixed ($)",                min_value=0, value=_e["other_fixed"],   step=25)
+    _e["other_fixed"] = other_fixed
 
 with col2:
     st.markdown("**Variable / Discretionary**")
-    groceries       = st.number_input("Groceries ($)",           min_value=0, value=600, step=50)
-    dining_out      = st.number_input("Dining Out / Takeaway ($)", min_value=0, value=400, step=50)
-    entertainment   = st.number_input("Entertainment / Hobbies ($)", min_value=0, value=300, step=50)
-    clothing        = st.number_input("Clothing / Personal ($)", min_value=0, value=150, step=25)
-    health          = st.number_input("Health / Fitness ($)",    min_value=0, value=100, step=25)
-    travel          = st.number_input("Travel / Holidays ($)",   min_value=0, value=300, step=50)
-    gifts_misc      = st.number_input("Gifts / Misc ($)",        min_value=0, value=100, step=25)
+    groceries       = st.number_input("Groceries ($)",                  min_value=0, value=_e["groceries"],    step=50)
+    _e["groceries"] = groceries
+    dining_out      = st.number_input("Dining Out / Takeaway ($)",      min_value=0, value=_e["dining_out"],   step=50)
+    _e["dining_out"] = dining_out
+    entertainment   = st.number_input("Entertainment / Hobbies ($)",   min_value=0, value=_e["entertainment"], step=50)
+    _e["entertainment"] = entertainment
+    clothing        = st.number_input("Clothing / Personal ($)",        min_value=0, value=_e["clothing"],     step=25)
+    _e["clothing"] = clothing
+    health          = st.number_input("Health / Fitness ($)",           min_value=0, value=_e["health"],       step=25)
+    _e["health"] = health
+    travel          = st.number_input("Travel / Holidays ($)",          min_value=0, value=_e["travel"],       step=50)
+    _e["travel"] = travel
+    gifts_misc      = st.number_input("Gifts / Misc ($)",               min_value=0, value=_e["gifts_misc"],   step=25)
+    _e["gifts_misc"] = gifts_misc
 
 # ── Core calculations ─────────────────────────────────────────────────────────
 monthly_fixed    = rent_mortgage + utilities + insurance + phone + transport_fixed + other_fixed
@@ -199,16 +279,17 @@ with exp_left:
     )
 with exp_right:
     export_values: dict[str, object] = {
-        "pf_monthly_savings": max(monthly_savings, 0),
-        "pf_annual_spending": annual_spending,
-        "pf_gross_income":    gross_income,
-        "pf_hecs_balance":    hecs_balance,
-        "pf_private_cover":   private_cover,
-        "pf_inflation":       inflation_rate * 100,
-        "pf_portfolio_return": portfolio_return * 100,
-        "pf_swr":             swr * 100,
-        "pf_portfolio":       existing_portfolio,
-        "pf_super_balance":   existing_super,
+        "pf_monthly_savings":      max(monthly_savings, 0),
+        "pf_annual_spending":      annual_spending,
+        "pf_current_housing_cost": rent_mortgage,
+        "pf_gross_income":         gross_income,
+        "pf_hecs_balance":         hecs_balance,
+        "pf_private_cover":        private_cover,
+        "pf_inflation":            inflation_rate * 100,
+        "pf_portfolio_return":     portfolio_return * 100,
+        "pf_swr":                  swr * 100,
+        "pf_portfolio":            existing_portfolio,
+        "pf_super_balance":        existing_super,
     }
     if _partnered:
         export_values.update({
@@ -322,22 +403,35 @@ st.subheader("Path to Financial Independence")
 
 real_return = (1 + portfolio_return) / (1 + inflation_rate) - 1
 
+# Preservation age and current age — used to gate illiquid super in the FIRE timeline
+_current_age = int(profile.get("pf_age") or 30)
+_pres_age    = preservation_age(int(profile.get("pf_birth_year") or (2026 - _current_age)))
+
+
 def years_to_fire(save_rate: float) -> float | None:
-    """Years to reach FIRE number given a savings rate, accounting for income growth."""
+    """Years to reach FIRE number given a savings rate.
+
+    Fixes applied:
+    - Target is fire_number (annual_spending / swr), not annual_income / swr (#3).
+    - Super is only counted once the user reaches preservation age (#4).
+    - Super contributions grow with income growth (approximating rising SG on rising salary) (#11).
+    """
     if save_rate <= 0:
         return None
-    portfolio = float(existing_portfolio)
+    portfolio     = float(existing_portfolio)
     super_bal_val = float(existing_super)
-    annual_inc = net_annual
+    annual_inc    = net_annual
+    current_sg    = float(annual_super_addition)   # grows each year with salary
     for yr in range(1, 81):
-        annual_inc *= (1 + income_growth)
-        annual_save = annual_inc * save_rate
-        portfolio   = portfolio * (1 + portfolio_return) + annual_save
-        super_bal_val = super_bal_val * (1 + portfolio_return) + annual_super_addition
-        # FIRE number based on current spending (real)
-        fire_target = (annual_inc / swr)
-        combined = portfolio + super_bal_val  # includes super (accessible after ~60)
-        if combined >= fire_target:
+        annual_inc    *= (1 + income_growth)
+        annual_save    = annual_inc * save_rate
+        portfolio      = portfolio * (1 + portfolio_return) + annual_save
+        super_bal_val  = super_bal_val * (1 + portfolio_return) + current_sg
+        current_sg    *= (1 + income_growth)       # SG is % of salary — grows with income
+        # Super only accessible at preservation age; exclude it before then
+        accessible_super = super_bal_val if (_current_age + yr) >= _pres_age else 0.0
+        combined = portfolio + accessible_super
+        if combined >= fire_number:                 # target = spending / swr, not income / swr
             return yr
     return None
 
@@ -486,8 +580,10 @@ with st.expander("📋 Methodology & Assumptions"):
 | Real Return | {real_return*100:.2f}%/yr |
 | Income Growth | {income_growth*100:.2f}%/yr |
 
-**FIRE calculation** includes both investment portfolio and super balance combined.
-super is assumed accessible at ~age 60 (preservation age).
+**FIRE calculation** uses annual spending ÷ SWR as the target (not income ÷ SWR).
+Super is gated behind your preservation age ({_pres_age}) — it is only counted once you reach
+that age. Super contributions in the timeline grow annually with income growth, approximating
+the rising SG on a growing salary.
 
 **Tax** uses 2024-25 Australian brackets with Stage 3 cuts, LITO, Medicare levy, MLS, and HECS.
 

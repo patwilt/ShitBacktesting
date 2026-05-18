@@ -65,7 +65,8 @@ with st.sidebar:
     st.divider()
     st.header("💼 Income & Contributions")
     gross_income   = st.number_input(_label_gross, min_value=0, step=5_000, value=profile.get(_key_gross))
-    sg_rate            = st.slider("Employer SG Rate (%)", 9.0, 12.0, 11.5, 0.25) / 100.0
+    sg_rate            = st.slider("Employer SG Rate (%)", 9.0, 15.0, 12.0, 0.25,
+                                   help="12% from 1 July 2025 (legislated schedule). Increase above 12% if your employer matches voluntary contributions.") / 100.0
     salary_sacrifice   = st.number_input(
         "Salary Sacrifice ($)", min_value=0, value=5_000, step=500,
         help="Annual additional super via pre-tax salary sacrifice, on top of employer SG."
@@ -83,7 +84,8 @@ with st.sidebar:
 
     st.divider()
     st.header("📈 Investment Returns")
-    super_return       = st.slider("Super Fund Return (%/yr)", 0.0, 14.0, 7.5, 0.25) / 100.0
+    super_return       = st.slider("Super Fund Return (%/yr, gross)", 0.0, 14.0, 7.5, 0.25,
+                                   help="Gross (pre-earnings-tax) nominal return. The calculator automatically deducts 15% earnings tax during the accumulation phase. Pension-phase drawdown uses the full gross return (0% earnings tax after age 60).") / 100.0
     inflation_rate     = st.slider("Inflation (%/yr)",         0.0, 8.0, min(8.0, max(0.0, float(profile.get("pf_inflation")))), 0.25) / 100.0
 
     st.divider()
@@ -130,6 +132,26 @@ else:
         f"cap available for additional salary sacrifice."
     )
 
+# Warn if salary growth will push the user above the Division 293 threshold in future years
+if div_293 == 0 and income_growth_rate > 0:
+    _d293_inc = float(gross_income)
+    _d293_conc = float(capped_conc)
+    _d293_trigger_yr: int | None = None
+    for _yr in range(1, years_to_retire + 1):
+        _d293_inc *= (1.0 + income_growth_rate)
+        _sg_yr = _d293_inc * sg_rate
+        _d293_conc = min(_sg_yr + salary_sacrifice, CONCESSIONAL_CAP)
+        if _d293_inc + _d293_conc > 250_000:
+            _d293_trigger_yr = _yr
+            break
+    if _d293_trigger_yr is not None:
+        st.info(
+            f"ℹ️ **Division 293 heads-up:** at {income_growth_rate*100:.1f}%/yr income growth, "
+            f"your income + concessional contributions will exceed $250,000 in year **{_d293_trigger_yr}** "
+            f"(age {current_age + _d293_trigger_yr}). An additional 15% tax will apply to your "
+            f"concessional contributions from that year. This is factored into the projection below."
+        )
+
 st.divider()
 
 # ── Projection: three scenarios ───────────────────────────────────────────────
@@ -146,7 +168,14 @@ def project_super(
     years: int,
     inflation: float,
 ) -> tuple[list[float], list[float], list[float]]:
-    """Returns (nominal balances, real balances, ages) for each year."""
+    """Returns (nominal balances, real balances, ages) for each year.
+
+    fund_return is the gross (pre-earnings-tax) fund return.
+    A 15% earnings tax is applied during accumulation phase, matching ATO rules.
+    Pension-phase drawdown is handled separately and correctly uses 0% earnings tax.
+    """
+    # Accumulation phase: super earnings taxed at 15%
+    fund_return_acc = fund_return * (1.0 - 0.15)
     balances_nom, balances_real, ages = [current_bal], [current_bal], [current_age]
     bal = float(current_bal)
     inc = float(annual_gross)
@@ -157,7 +186,7 @@ def project_super(
         s_tax       = super_concessional_tax(conc)
         d293        = division_293_tax(inc, conc)
         net_contrib = conc - s_tax - d293 + min(non_conc, NON_CONC_CAP)
-        bal         = bal * (1 + fund_return) + net_contrib
+        bal         = bal * (1.0 + fund_return_acc) + net_contrib
         cpi         = (1 + inflation) ** yr
         balances_nom.append(bal)
         balances_real.append(bal / cpi)
@@ -203,7 +232,7 @@ with exp_r:
         f"Export {person}'s Super to Profile",
         super_export,
         help=f"Updates the shared profile {person.lower()}'s super balance and gross "
-             "income so Dashboard, Net Wealth, and FIRE pages stay in sync.",
+             "income so the Dashboard and FIRE pages stay in sync.",
     )
 
 m1, m2, m3 = st.columns(3)
@@ -245,20 +274,22 @@ st.divider()
 st.subheader("Tax Saving from Salary Sacrifice")
 
 if salary_sacrifice > 0 and salary_sacrifice <= max_ss:
-    marginal_saved = (
+    # Income tax + Medicare saving = difference between tax before and after sacrifice
+    income_tax_saved = (
         net_income_tax(gross_income) + medicare_levy(gross_income)
         - net_income_tax(gross_income - salary_sacrifice) - medicare_levy(gross_income - salary_sacrifice)
-        - super_concessional_tax(salary_sacrifice)
     )
+    super_tax_cost  = super_concessional_tax(salary_sacrifice)
+    net_tax_saving  = max(income_tax_saved - super_tax_cost, 0.0)
     st.markdown(f"""
 **Salary Sacrifice of ${salary_sacrifice:,.0f}/yr:**
 
 | Tax Metric | Amount |
 |---|---|
-| Income tax + Medicare levy saved | ${max(marginal_saved, 0):,.0f}/yr |
-| Super contributions tax paid (15%) | ${super_concessional_tax(salary_sacrifice):,.0f}/yr |
-| **Net tax saving** | **${max(marginal_saved - super_concessional_tax(salary_sacrifice), 0):,.0f}/yr** |
-| Over {years_to_retire} years (uninvested) | ${max(marginal_saved - super_concessional_tax(salary_sacrifice), 0) * years_to_retire:,.0f} |
+| Income tax + Medicare levy saved | ${max(income_tax_saved, 0):,.0f}/yr |
+| Super contributions tax paid (15%) | ${super_tax_cost:,.0f}/yr |
+| **Net tax saving** | **${net_tax_saving:,.0f}/yr** |
+| Over {years_to_retire} years (uninvested) | ${net_tax_saving * years_to_retire:,.0f} |
 
 *Salary sacrifice is most effective when your marginal income tax rate exceeds 15% (i.e., income > $18,200).*
 """)

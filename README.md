@@ -4,7 +4,34 @@
 
 ---
 
-## Pipeline
+## FIRE Dashboard (Streamlit Web App)
+
+The project includes a multi-page interactive FIRE planning dashboard built with Streamlit.
+
+### Pages
+
+| Page | Description |
+|---|---|
+| **01 Budget & Savings** | Income, expenses, and savings rate |
+| **02 Net Wealth** | Track assets and liabilities over time |
+| **03 Super Calculator** | Australian superannuation projections |
+| **04 Home Deposit** | Savings target and timeline for a home deposit |
+| **05 FIRE Scenarios** | Side-by-side FIRE number comparisons |
+| **06 Retirement Drawdown** | Portfolio drawdown modelling in retirement |
+| **07 Historical Outcomes** | Backtest-based retirement outcome analysis |
+| **08 Portfolio Analytics** | Deep-dive portfolio metrics and charts |
+
+### Launch the dashboard
+
+```bash
+streamlit run fire_dashboard.py
+```
+
+The app opens in your browser at `http://localhost:8501` by default.
+
+---
+
+## Backtest Pipeline
 
 ```
 data_downloader.py          →  data/market_data/
