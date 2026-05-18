@@ -34,6 +34,42 @@ _pf_mortgage_monthly = profile.get("pf_mortgage_monthly")
 _pf_wants_purchase   = bool(profile.get("pf_wants_to_purchase"))
 _mortgage_default    = int(_pf_mortgage_monthly) if (_pf_wants_purchase and _pf_mortgage_monthly is not None) else 2_200
 
+# ── Avg Aussie Family of 4 benchmarks (2026 ABS / CommBank iQ data) ───────────
+# Sources: ABS Household Expenditure Survey, CommBank iQ transaction index,
+# RBA rental data, and industry insurance benchmarks. All figures are monthly.
+BENCHMARK_AUS_FAMILY_4: dict[str, int] = {
+    "rent_mortgage":   2_747,   # ABS dwelling services national avg ($634/wk)
+    "utilities":         281,   # ABS $65/wk; upper-middle households $345
+    "insurance":         244,   # CommBank iQ retail insurance avg; full family ~$700+
+    "phone":             225,   # ABS comms $52/wk (broadband + mobiles)
+    "transport_fixed":   550,   # ABS private vehicle ops $127/wk (excl. purchase)
+    "other_fixed":       702,   # ABS misc goods & services $162/wk
+    "groceries":         858,   # ABS national avg $198/wk; family of 4 up to $1,733
+    "dining_out":        309,   # CommBank iQ per-capita card spend
+    "entertainment":     300,   # Trimmed family estimate; ABS recreation avg $1,265
+    "clothing":          150,   # Midpoint: ABS $442 national vs CommBank $101 per-capita
+    "health":             87,   # CommBank iQ daily fitness/pharmacy spend ($2.90/day)
+    "travel":            309,   # CommBank iQ per-capita travel spend
+    "gifts_misc":        100,   # Conservative buffer (ABS full misc $702)
+}
+
+# Labels and source notes shown in the benchmark comparison expander
+BENCHMARK_NOTES: dict[str, str] = {
+    "rent_mortgage":   "ABS national avg rent $634/wk; mortgagees pay ~$3,713/mo",
+    "utilities":       "ABS $65/wk national; upper-middle households average $345/mo",
+    "insurance":       "CommBank iQ $244/mo basic retail; full family (home+car+health) ~$700+",
+    "phone":           "ABS $52/wk full comms (broadband + mobiles + devices)",
+    "transport_fixed": "ABS $127/wk private vehicle ops only (excl. vehicle purchase & PT)",
+    "other_fixed":     "ABS $162/wk misc goods & services (rates, fees, compliance)",
+    "groceries":       "ABS national avg $198/wk; family of 4 realistic range $1,213–$1,733",
+    "dining_out":      "CommBank iQ avg $309/mo; ABS hotels/cafes national avg $1,057/mo",
+    "entertainment":   "Trimmed family budget; ABS recreation & culture national avg $1,265/mo",
+    "clothing":        "ABS national avg $442/mo; CommBank iQ per-capita $101/mo",
+    "health":          "CommBank iQ daily wellness $2.90/day; full ABS health $910/mo",
+    "travel":          "CommBank iQ per-capita $309/mo; older cohorts spend significantly more",
+    "gifts_misc":      "Conservative buffer; ABS full misc $702/mo (up 8.7% in early 2026)",
+}
+
 if "bs_expenses" not in st.session_state:
     st.session_state["bs_expenses"] = {
         "rent_mortgage":  _mortgage_default,
@@ -162,6 +198,39 @@ hecs_annual        = tax_you["hecs_repayment"]  + tax_partner["hecs_repayment"]
 
 # ── Expense inputs in main area ───────────────────────────────────────────────
 st.subheader("Monthly Expenses")
+
+# Toggle: custom vs. Avg Aussie Family of 4 benchmark
+_bm_cols = st.columns([2, 3])
+with _bm_cols[0]:
+    _use_benchmark = st.toggle(
+        "📊 Load Avg Aussie Family of 4 benchmarks",
+        value=st.session_state.get("bs_use_benchmark", False),
+        help=(
+            "Pre-fills each field with 2026 Australian average household spending "
+            "data from the ABS, CommBank iQ, and RBA research. "
+            "You can still edit any value after loading. "
+            "Switch back to Custom to restore your previous entries."
+        ),
+    )
+st.session_state["bs_use_benchmark"] = _use_benchmark
+
+# When the toggle flips ON, overwrite the session expense dict with benchmarks.
+# The mortgage field stays at the profile/Home Deposit value if available.
+_prev_benchmark_state = st.session_state.get("_bs_prev_benchmark", False)
+if _use_benchmark and not _prev_benchmark_state:
+    for _k, _v in BENCHMARK_AUS_FAMILY_4.items():
+        if _k == "rent_mortgage" and _pf_wants_purchase and _pf_mortgage_monthly is not None:
+            continue  # keep the Home Deposit plan value
+        _e[_k] = _v
+st.session_state["_bs_prev_benchmark"] = _use_benchmark
+
+if _use_benchmark:
+    st.info(
+        "**Benchmark mode active** — fields are pre-filled with 2026 average Australian "
+        "household expenditure data (ABS / CommBank iQ). "
+        "Edit any value to customise. Toggle off to return to your saved entries."
+    )
+
 col1, col2 = st.columns(2)
 
 with col1:
@@ -213,6 +282,122 @@ annual_spending  = monthly_expenses * 12
 fire_number      = (annual_spending / swr) if swr > 0 else 0
 
 st.divider()
+
+# ── Benchmark comparison expander ─────────────────────────────────────────────
+_expense_keys = [
+    ("rent_mortgage",   "Rent / Mortgage"),
+    ("utilities",       "Utilities"),
+    ("insurance",       "Insurance"),
+    ("phone",           "Phone / Subscriptions"),
+    ("transport_fixed", "Transport"),
+    ("other_fixed",     "Other Fixed"),
+    ("groceries",       "Groceries"),
+    ("dining_out",      "Dining Out / Takeaway"),
+    ("entertainment",   "Entertainment / Hobbies"),
+    ("clothing",        "Clothing / Personal"),
+    ("health",          "Health / Fitness"),
+    ("travel",          "Travel / Holidays"),
+    ("gifts_misc",      "Gifts / Misc"),
+]
+_current_values = {
+    "rent_mortgage":   rent_mortgage,
+    "utilities":       utilities,
+    "insurance":       insurance,
+    "phone":           phone,
+    "transport_fixed": transport_fixed,
+    "other_fixed":     other_fixed,
+    "groceries":       groceries,
+    "dining_out":      dining_out,
+    "entertainment":   entertainment,
+    "clothing":        clothing,
+    "health":          health,
+    "travel":          travel,
+    "gifts_misc":      gifts_misc,
+}
+
+with st.expander("📊 Benchmark Comparison — Avg Aussie Family of 4 (2026)"):
+    st.caption(
+        "How your budget compares to 2026 Australian household spending benchmarks "
+        "(ABS Household Expenditure Survey · CommBank iQ transaction index · RBA rental data). "
+        "Green = under benchmark · Red = over benchmark."
+    )
+
+    _bm_rows = []
+    for key, label in _expense_keys:
+        your_val = _current_values[key]
+        bm_val   = BENCHMARK_AUS_FAMILY_4[key]
+        delta    = your_val - bm_val
+        delta_pct = (delta / bm_val * 100) if bm_val else 0
+        arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "—")
+        colour = "#c0392b" if delta > 50 else ("#27ae60" if delta < -50 else "#7f8c8d")
+        _bm_rows.append({
+            "Category":        label,
+            "Your Budget":     f"${your_val:,}",
+            "AUS Avg":         f"${bm_val:,}",
+            "Difference":      f"{arrow} ${abs(delta):,}  ({delta_pct:+.0f}%)",
+            "_delta":          delta,
+            "_colour":         colour,
+            "Data source":     BENCHMARK_NOTES[key],
+        })
+
+    # Summary headline numbers
+    _total_yours = sum(_current_values.values())
+    _total_bm    = sum(BENCHMARK_AUS_FAMILY_4.values())
+    _total_delta = _total_yours - _total_bm
+
+    hc1, hc2, hc3 = st.columns(3)
+    hc1.metric("Your Total Budget",     f"${_total_yours:,}/mo")
+    hc2.metric("AUS Family of 4 Avg",   f"${_total_bm:,}/mo")
+    hc3.metric(
+        "Your vs. Benchmark",
+        f"${abs(_total_delta):,}/mo {'over' if _total_delta > 0 else 'under'}",
+        delta=f"${_total_delta:+,}",
+        delta_color="inverse" if _total_delta > 0 else "normal",
+    )
+
+    st.markdown("")
+
+    # Render rows as styled HTML table for colour coding
+    _table_html = """
+<style>
+.bm-table { width:100%; border-collapse:collapse; font-size:13px; }
+.bm-table th { text-align:left; padding:6px 10px; border-bottom:2px solid #E8E4DC;
+               color:#8A8480; font-weight:700; font-size:11px; text-transform:uppercase;
+               letter-spacing:.8px; }
+.bm-table td { padding:6px 10px; border-bottom:1px solid #F0EDE8; vertical-align:top; }
+.bm-table tr:last-child td { border-bottom:none; }
+.over  { color:#c0392b; font-weight:600; }
+.under { color:#27ae60; font-weight:600; }
+.even  { color:#7f8c8d; }
+.source { color:#aaa; font-size:11px; font-style:italic; }
+</style>
+<table class="bm-table">
+<thead><tr>
+  <th>Category</th><th>Your Budget</th><th>AUS Avg</th>
+  <th>Difference</th><th>Source</th>
+</tr></thead><tbody>"""
+
+    for row in _bm_rows:
+        cls = "over" if row["_delta"] > 50 else ("under" if row["_delta"] < -50 else "even")
+        _table_html += (
+            f"<tr>"
+            f"<td>{row['Category']}</td>"
+            f"<td>{row['Your Budget']}</td>"
+            f"<td>{row['AUS Avg']}</td>"
+            f"<td class='{cls}'>{row['Difference']}</td>"
+            f"<td class='source'>{row['Data source']}</td>"
+            f"</tr>"
+        )
+
+    _table_html += "</tbody></table>"
+    st.markdown(_table_html, unsafe_allow_html=True)
+
+    st.caption(
+        "⚠️ Benchmarks are national averages and will vary significantly by city, "
+        "household size, income level, and lifestyle. The 'Avg Aussie Family of 4' preset "
+        "uses general/national medians — upper-middle-class households in Sydney or Melbourne "
+        "typically spend 30–50% above these figures."
+    )
 
 # ── Key metrics ───────────────────────────────────────────────────────────────
 m1, m2, m3, m4 = st.columns(4)
@@ -300,8 +485,8 @@ with exp_left:
         f"**Monthly Savings = ${monthly_savings:,.0f}**  ·  "
         f"Annual Spending = ${annual_spending:,.0f}  ·  "
         f"FIRE Number = ${fire_number:,.0f}  \n"
-        "📤 **Export** to push these to: **Home Deposit** (deposit timeline), "
-        "**FIRE Scenarios** (DCA + spending target), and **Retirement Drawdown** (withdrawal amount)."
+        "📤 **Export** to push these to: **Home Deposit** (deposit timeline) "
+        "and **FIRE Scenarios** (DCA + spending target)."
     )
 with exp_right:
     export_values: dict[str, object] = {

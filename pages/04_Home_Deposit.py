@@ -412,15 +412,15 @@ elif monthly_savings_available == 0:
     st.info("💡 Enter your monthly savings above (or run the Budget page) to see your personalised deposit timeline.")
 else:
     st.warning(
-        f"⚠️ Saving ${monthly_savings_available:,}/mo (growing with salary), the deposit target cannot be "
+        f"⚠️ Saving \\${monthly_savings_available:,}/mo (growing with salary), the deposit target cannot be "
         f"reached within 30 years at the current property growth and savings return assumptions. "
         f"Consider a higher savings rate, a cheaper property, or a lower deposit percentage."
     )
 
 if lmi > 0:
     st.warning(
-        f"⚠️ **LMI Alert:** A {deposit_pct}% deposit on a ${future_price:,.0f} property incurs "
-        f"~${lmi:,.0f} in Lenders Mortgage Insurance. This adds to your upfront cost. "
+        f"⚠️ **LMI Alert:** A {deposit_pct}% deposit on a \\${future_price:,.0f} property incurs "
+        f"~\\${lmi:,.0f} in Lenders Mortgage Insurance. This adds to your upfront cost. "
         f"Consider saving to 20% to avoid LMI."
     )
 
@@ -437,7 +437,7 @@ elif req_pct_of_income > 30:
 else:
     st.success(
         f"✅ Saving {req_pct_of_income:.1f}% of take-home pay is realistic. Set up a "
-        f"dedicated savings account and automate ${req_monthly:,.0f}/month."
+        f"dedicated savings account and automate \\${req_monthly:,.0f}/month."
     )
 
 st.divider()
@@ -445,7 +445,7 @@ st.divider()
 # ── Mortgage serviceability ───────────────────────────────────────────────────
 st.subheader("🏦 Mortgage Serviceability")
 st.caption(
-    f"Assumes you buy at the projected future price of **${future_price:,.0f}** "
+    f"Assumes you buy at the projected future price of **\\${future_price:,.0f}** "
     f"in {target_years} years with a **{deposit_pct}%** deposit, "
     f"financed over **{loan_term_years} years** at **{mortgage_rate*100:.2f}%/yr**."
 )
@@ -512,7 +512,7 @@ m4.metric(
 # Show current-income ratio as a reference line
 if salary_growth_rate > 0:
     st.caption(
-        f"📊 On **today's** income (${net_monthly:,.0f}/mo net): **{repay_pct_today:.1f}%** of take-home. "
+        f"📊 On **today's** income (\\${net_monthly:,.0f}/mo net): **{repay_pct_today:.1f}%** of take-home. "
         f"With salary growth this improves to **{repay_pct_proj:.1f}%** by the time you buy."
     )
 
@@ -520,20 +520,20 @@ if salary_growth_rate > 0:
 if repay_pct_proj > 35:
     st.error(
         f"🔴 **Mortgage stress zone: {repay_pct_proj:.1f}% of projected take-home.** "
-        f"Even accounting for salary growth to ${proj_net_monthly:,.0f}/mo, repayments exceed the "
+        f"Even accounting for salary growth to \\${proj_net_monthly:,.0f}/mo, repayments exceed the "
         f"35% threshold. Consider a larger deposit, cheaper property, longer loan term, or "
         f"increasing your savings rate to reach 20%+ deposit sooner."
     )
 elif repay_pct_proj > 28:
     st.warning(
         f"🟡 **Manageable but stretched: {repay_pct_proj:.1f}% of projected take-home.** "
-        f"Repayments at ${monthly_repayment:,.0f}/mo leave ${proj_net_monthly - monthly_repayment:,.0f}/mo "
+        f"Repayments at \\${monthly_repayment:,.0f}/mo leave \\${proj_net_monthly - monthly_repayment:,.0f}/mo "
         f"after the mortgage. A rate rise of 1–2% could push into stress territory."
     )
 else:
     st.success(
         f"🟢 **Repayments look serviceable: {repay_pct_proj:.1f}% of projected take-home.** "
-        f"Below the 28% comfort threshold — you'd have ${proj_net_monthly - monthly_repayment:,.0f}/mo "
+        f"Below the 28% comfort threshold — you'd have \\${proj_net_monthly - monthly_repayment:,.0f}/mo "
         f"left after the mortgage for living costs and other savings."
     )
 
@@ -569,7 +569,7 @@ if intend_to_purchase:
 
     st.caption(
         f"Post-purchase snapshot at purchase date — in **{target_years} year(s)**, "
-        f"projected property value **${future_price:,.0f}** (nominal)."
+        f"projected property value **\\${future_price:,.0f}** (nominal)."
     )
 
     if _has_budget_data:
@@ -618,38 +618,57 @@ if intend_to_purchase:
         )
 
     st.info(
-        f"💡 **Home equity note:** Your deposit of **${future_deposit:,.0f}** is tied up as equity "
+        f"💡 **Home equity note:** Your deposit of **\\${future_deposit:,.0f}** is tied up as equity "
         f"in the property at purchase — it is not available as investable cash. "
         f"Home equity grows as the property appreciates and the mortgage is paid down."
     )
     if investable_surplus < 0:
         _deficit_cause = (
-            f"mortgage (${monthly_repayment:,.0f}/mo) + living expenses (${_monthly_non_housing:,.0f}/mo)"
-            if _has_budget_data else f"mortgage repayment (${monthly_repayment:,.0f}/mo)"
+            f"mortgage (\\${monthly_repayment:,.0f}/mo) + living expenses (\\${_monthly_non_housing:,.0f}/mo)"
+            if _has_budget_data else f"mortgage repayment (\\${monthly_repayment:,.0f}/mo)"
         )
         st.error(
-            f"🚨 Projected income at purchase (${proj_net_monthly:,.0f}/mo) is less than "
+            f"🚨 Projected income at purchase (\\${proj_net_monthly:,.0f}/mo) is less than "
             f"{_deficit_cause}. "
             f"Consider a larger deposit, cheaper property, or a longer loan term."
         )
 
     # ── Export purchase commitment ────────────────────────────────────────────
     st.divider()
-    _surplus_for_export: float | None = investable_surplus if _has_budget_data else None
+    # Export today's PRE-MORTGAGE investable surplus (net of living only).
+    # FIRE Scenarios applies the mortgage as a separate per-year drag override
+    # so it stays constant in NOMINAL terms (which is how real-world P&I works) —
+    # declining in real terms over the life of the loan. Subtracting the future
+    # nominal repayment from today's income here would mix time bases and the
+    # engine would also over-grow the mortgage portion with salary.
+    _investable_for_dca: float | None = (
+        net_monthly - _monthly_non_housing
+        if _has_budget_data else None
+    )
+    _surplus_for_export = _investable_for_dca
     _ex_info_col, _ex_btn_col = st.columns([3, 1])
     with _ex_info_col:
         if _has_budget_data:
             st.info(
-                f"📤 **Ready to export:** monthly investable surplus of **${max(investable_surplus, 0):,.0f}** "
-                f"will auto-fill the Monthly DCA on the **FIRE Scenarios** page."
+                f"📤 **Ready to export:** today's pre-mortgage investable surplus of "
+                f"**\\${max(_investable_for_dca, 0):,.0f}/mo** "
+                f"(today's net income minus living expenses) will auto-fill the Monthly DCA "
+                f"on the **FIRE Scenarios** page.  \n"
+                f"During mortgage years the FIRE engine deducts **\\${monthly_repayment:,.0f}/mo** "
+                f"(constant nominal — declines in real terms over the {loan_term_years}-year loan)."
             )
         else:
             st.warning(
                 "💡 For a more accurate number, export your **Budget & Savings** first — "
-                "then the investable surplus will account for all living expenses, not just the mortgage. "
-                f"Exporting income minus mortgage only: **${max(investable_surplus, 0):,.0f}/mo**."
+                "then the investable surplus will account for all living expenses. "
+                f"Exporting today's net income only: **\\${max(net_monthly, 0):,.0f}/mo**. "
+                "The mortgage is applied separately by the FIRE engine."
             )
     with _ex_btn_col:
+        # When budget data isn't available, fall back to today's net monthly so
+        # the FIRE page still has a sane DCA starting point (mortgage is applied
+        # as a separate engine override so omitting living is conservative).
+        _surplus_or_net = _surplus_for_export if _surplus_for_export is not None else net_monthly
         _purchase_export = {
             "pf_wants_to_purchase":          True,
             "pf_property_value":             future_price,
@@ -658,7 +677,8 @@ if intend_to_purchase:
             "pf_mortgage_rate":              mortgage_rate,
             "pf_loan_term_years":            loan_term_years,
             "pf_purchase_years_from_now":    target_years,
-            "pf_monthly_investable_surplus": _surplus_for_export,
+            "pf_monthly_investable_surplus": _surplus_or_net,
+            "pf_deposit_monthly_savings":    req_monthly,
         }
         profile.export_button(
             "Export Purchase Plan to Profile",
@@ -836,23 +856,68 @@ elif _user_pct is not None and _user_pct > 50:
 st.divider()
 
 # ── After-tax income waterfall ────────────────────────────────────────────────
-st.subheader("Your Monthly Income Breakdown")
+st.subheader("Your Monthly Income Breakdown (Today's AUD)")
 income_tax_amt  = tax_result["income_tax"] / 12
 medicare_amt    = (tax_result["medicare_levy"] + tax_result["medicare_levy_surcharge"]) / 12
 hecs_amt        = tax_result["hecs_repayment"] / 12
 saving_amt      = req_monthly
-remaining_amt   = max(net_monthly - req_monthly, 0)
+
+# Pull living-expense data exported from the Budget & Savings page so the
+# chart reflects the full cashflow picture, not just tax + deposit savings.
+_chart_annual_spending  = profile.get("pf_annual_spending")
+_chart_current_housing  = profile.get("pf_current_housing_cost")
+_has_budget_chart       = _chart_annual_spending is not None and _chart_current_housing is not None
+_monthly_non_housing    = (
+    max(float(_chart_annual_spending) / 12 - float(_chart_current_housing), 0)
+    if _has_budget_chart else 0.0
+)
+
+# Express the future mortgage in TODAY'S AUD so the chart compares like-for-like
+# with today's net income, tax, deposit, and living expenses. The nominal future
+# repayment deflated by CPI at the purchase date is what the mortgage *would feel
+# like today*. (Real mortgage burden also declines over the life of the loan; this
+# chart shows the year-of-purchase real value as a representative snapshot.)
+_mortgage_today_aud = monthly_repayment / ((1 + inflation_rate) ** target_years)
+
+# Remaining income = net - deposit savings - mortgage (real at purchase) - other living costs.
+# Without budget data, other living costs are omitted (not double-counted via housing).
+remaining_amt = max(net_monthly - saving_amt - _mortgage_today_aud - _monthly_non_housing, 0)
+
+_bar_labels = ["Income Tax", "Medicare", "HECS", "Deposit Savings", "Future Mortgage (today's $)"]
+_bar_values = [income_tax_amt, medicare_amt, hecs_amt, saving_amt, _mortgage_today_aud]
+_bar_colors = [
+    COLORS["red"], COLORS["orange"], COLORS["yellow"],
+    COLORS["mint"],
+    COLORS["red"] if repay_pct_proj > 35 else COLORS["orange"] if repay_pct_proj > 28 else COLORS["teal"],
+]
+
+if _has_budget_chart and _monthly_non_housing > 0:
+    _bar_labels.append("Other Living Costs")
+    _bar_values.append(_monthly_non_housing)
+    _bar_colors.append(COLORS["purple"])
+
+_bar_labels.append("Remaining Income")
+_bar_values.append(remaining_amt)
+_bar_colors.append(COLORS["blue"])
+
+if not _has_budget_chart:
+    st.caption(
+        "💡 Export your **Budget & Savings** page to include your living expenses "
+        "in this chart and get a more accurate remaining income figure."
+    )
+
+st.caption(
+    f"💡 Bars are in **today's AUD**. The future mortgage of "
+    f"**\\${monthly_repayment:,.0f}/mo** (nominal at purchase) is shown deflated to "
+    f"**\\${_mortgage_today_aud:,.0f}/mo** (real, at purchase date) so it's directly "
+    f"comparable to today's income and expenses."
+)
 
 fig3 = go.Figure(go.Bar(
-    x=["Income Tax", "Medicare", "HECS", "Deposit Savings", "Future Mortgage", "Remaining Income"],
-    y=[income_tax_amt, medicare_amt, hecs_amt, saving_amt, monthly_repayment, remaining_amt],
-    marker_color=[
-        COLORS["red"], COLORS["orange"], COLORS["yellow"],
-        COLORS["mint"],
-        COLORS["red"] if repay_pct_proj > 35 else COLORS["orange"] if repay_pct_proj > 28 else COLORS["teal"],
-        COLORS["blue"],
-    ],
-    text=[f"${v:,.0f}" for v in [income_tax_amt, medicare_amt, hecs_amt, saving_amt, monthly_repayment, remaining_amt]],
+    x=_bar_labels,
+    y=_bar_values,
+    marker_color=_bar_colors,
+    text=[f"${v:,.0f}" for v in _bar_values],
     textposition="outside",
 ))
 fig3.update_layout(
@@ -901,14 +966,18 @@ with exp_r:
             "pf_partner_private_cover": p_private_cover,
         })
     if intend_to_purchase:
-        # Compute investable surplus for export using budget profile data.
-        # (Mirrors the logic in the "After You Buy" display section above.)
+        # Export today's PRE-MORTGAGE surplus (net of living only). The FIRE
+        # engine applies the mortgage as a separate per-year drag override so
+        # it stays constant in nominal terms (declining in real over the loan).
+        # Using projected income or subtracting the future nominal mortgage
+        # here would double-count salary growth and mix time bases.
         _exp_annual_spending = profile.get("pf_annual_spending")
         _exp_current_housing = profile.get("pf_current_housing_cost")
-        _exp_investable: float | None = None
         if _exp_annual_spending is not None and _exp_current_housing is not None:
             _exp_non_housing = max(_exp_annual_spending / 12 - _exp_current_housing, 0)
-            _exp_investable = proj_net_monthly - monthly_repayment - _exp_non_housing
+            _exp_investable = net_monthly - _exp_non_housing
+        else:
+            _exp_investable = net_monthly  # fall back to net of tax only
         deposit_export.update({
             "pf_wants_to_purchase":          True,
             "pf_property_value":             future_price,
@@ -918,6 +987,7 @@ with exp_r:
             "pf_loan_term_years":            loan_term_years,
             "pf_purchase_years_from_now":    target_years,
             "pf_monthly_investable_surplus": _exp_investable,
+            "pf_deposit_monthly_savings":    req_monthly,
         })
     else:
         deposit_export["pf_wants_to_purchase"] = False
@@ -933,16 +1003,16 @@ with st.expander("📋 Assumptions & Methodology"):
     st.markdown(f"""
 | Assumption | Value |
 |---|---|
-| Property price today | ${property_price_today:,.0f} |
+| Property price today | \\${property_price_today:,.0f} |
 | Property price growth | {property_growth_rate*100:.2f}%/yr |
 | Savings investment return | {savings_return*100:.2f}%/yr |
 | Inflation rate | {inflation_rate*100:.2f}%/yr |
 | Deposit required | {deposit_pct}% of future purchase price |
 | Stamp duty + costs | {stamp_duty_pct}% of future purchase price |
 | Tax year | 2024-25 AUS (Stage 3 cuts applied) |
-| After-tax monthly income | ${net_monthly:,.0f} |
+| After-tax monthly income | \\${net_monthly:,.0f} |
 
-**Real $ figures** deflate nominal amounts by CPI at `{inflation_rate*100:.2f}%/yr` to show
+**Real \\$ figures** deflate nominal amounts by CPI at `{inflation_rate*100:.2f}%/yr` to show
 today's purchasing power equivalent.
 
 **LMI** estimate uses: 2.5% of loan for 15–19%, 3.0% for 10–14%, 4.0% for 5–9%.

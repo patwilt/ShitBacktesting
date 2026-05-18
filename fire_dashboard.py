@@ -635,7 +635,7 @@ _step_card(
     "Time in the market beats timing the market. A consistent DCA strategy into a globally diversified "
     "index ETF portfolio has historically been the most reliable path to long-term wealth for "
     "the majority of investors. Evidence, not hype.",
-    "FIRE Scenarios · Retirement Drawdown · Portfolio Analytics", "5 → 8",
+    "FIRE Scenarios · Portfolio Analytics", "5 → 8",
     _s6_status,
 )
 
@@ -644,7 +644,7 @@ st.divider()
 # ── FIRE & Backtest Tools ──────────────────────────────────────────────────────
 with st.expander("📊 FIRE & Portfolio Backtest Data", expanded=False):
     st.caption(
-        "FIRE Scenarios, Retirement Drawdown, Historical Outcomes, and Portfolio Analytics "
+        "FIRE Scenarios, Historical Outcomes, and Portfolio Analytics "
         "use rolling historical backtest data. Load a CSV or use the bundled sample below."
     )
 
