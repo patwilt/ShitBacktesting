@@ -117,6 +117,7 @@ def run_yearly_projection(
     inflation_rate: float,
     adjust_inflation: bool,
     return_percentile: int = 50,
+    annual_cost_overrides: dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """
     Year-by-year portfolio projection for multiple strategies.
@@ -124,6 +125,10 @@ def run_yearly_projection(
     return_percentile selects which percentile of the historical CAGR distribution to use
     as the forward return for each strategy (default 50 = median).
     Use 25 for conservative planning, 75 for optimistic stress-testing.
+
+    annual_cost_overrides maps projection year (1-indexed) → extra annual cost for that year.
+    Costs are deducted from the DCA contribution — if costs exceed DCA, contributions floor at 0.
+    Useful for modelling kids costs, housing upgrades, or other one-off / phased expenses.
     """
     is_percentage = "Percentage" in return_format
     strategy_returns: dict[str, float] = {}
@@ -166,13 +171,18 @@ def run_yearly_projection(
                 current_monthly_dca *= 1.0 + salary_growth / 100.0
 
         current_inf_denominator = (inf_factor ** year) if adjust_inflation else 1.0
+
+        # Reduce effective DCA by any per-year cost overrides (kids costs, etc.)
+        year_extra_cost = float((annual_cost_overrides or {}).get(year, 0.0))
+        effective_monthly_dca = max(current_monthly_dca - year_extra_cost / 12.0, 0.0)
+
         year_row["Salary"] = current_salary / current_inf_denominator
-        year_row["Yearly_DCA"] = (current_monthly_dca * 12.0) / current_inf_denominator
+        year_row["Yearly_DCA"] = (effective_monthly_dca * 12.0) / current_inf_denominator
 
         for strat in strategy_cols:
             ann_ret = strategy_returns[strat]
             monthly_ret = (1.0 + ann_ret) ** (1.0 / 12.0) - 1.0
-            active_monthly_dca = 0.0 if (stop_at_coast and has_coasted[strat]) else current_monthly_dca
+            active_monthly_dca = 0.0 if (stop_at_coast and has_coasted[strat]) else effective_monthly_dca
             start_of_year_val = current_portfolios[strat]
 
             if abs(monthly_ret) < 1e-10:
@@ -188,7 +198,7 @@ def run_yearly_projection(
             current_contributions[strat] += active_monthly_dca * 12.0
 
             nominal_yearly_profit = (current_portfolios[strat] - start_of_year_val) - (active_monthly_dca * 12.0)
-            if nominal_yearly_profit > (current_monthly_dca * 12.0):
+            if nominal_yearly_profit > (effective_monthly_dca * 12.0):
                 has_coasted[strat] = True
 
             real_total = current_portfolios[strat] / current_inf_denominator

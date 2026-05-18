@@ -53,6 +53,22 @@ PROFILE_DEFAULTS: dict[str, object] = {
     "pf_mortgage_rate":          None,  # interest rate (decimal)
     "pf_loan_term_years":        None,  # loan term in years
     "pf_purchase_years_from_now": None, # years until purchase
+    # Kids & Family plan (set by Kids page)
+    "pf_kids_enabled":                    False,
+    "pf_num_kids":                        2,
+    "pf_kid1_birth_yr_from_now":          3,    # years from now
+    "pf_kid2_birth_yr_from_now":          6,    # years from now (if num_kids >= 2)
+    "pf_kid3_birth_yr_from_now":          9,    # years from now (if num_kids >= 3)
+    "pf_kids_schooling":                  "public",   # "public" | "catholic" | "private"
+    "pf_kids_private_school_annual":      20_000,     # per child/yr if private (primary)
+    "pf_kids_private_highschool_annual":  30_000,     # per child/yr if private (high school)
+    "pf_kids_childcare_annual":           12_000,     # per child/yr ages 0–4 after CCS subsidy
+    "pf_kids_setup_cost":                 7_500,      # one-off per child at birth
+    "pf_parental_leave_weeks":            18,         # your weeks of leave
+    "pf_parental_leave_partner_weeks":    4,          # partner weeks
+    "pf_parental_leave_income_pct":       50,         # % of salary received during leave
+    "pf_partner_career_break_years":      0,          # full years partner stays off work after parental leave
+    "pf_kids_bigger_house_extra_monthly": 0,          # extra monthly housing cost for bigger place
     # Calculated outputs (set by calculator pages)
     "pf_monthly_savings":           None,  # set by Budget page
     "pf_annual_spending":           None,  # set by Budget page

@@ -8,10 +8,11 @@ from __future__ import annotations
 import plotly.graph_objects as go
 import streamlit as st
 
-from engines.tax_engine import effective_tax_rate, CGTLaw
+from engines.tax_engine import effective_tax_rate, CGTLaw, gross_withdrawal_for_net_spend
 from engines.calculation_engine import preservation_age
 from utils.colors import COLORS, CHART_LAYOUT, CHART_BG
 from utils import shared_profile as profile
+from utils.kids_engine import compute_kids_costs, kids_cost_label
 
 st.set_page_config(page_title="Budget & Savings Rate", page_icon="💰", layout="wide")
 profile.init()
@@ -233,10 +234,19 @@ m3.metric(
     delta=f"{savings_rate * 100:.1f}% savings rate",
     delta_color="normal" if monthly_savings > 0 else "inverse",
 )
+_fire_num_help = (
+    f"Portfolio needed so {swr*100:.1f}% annual withdrawal covers your ${annual_spending:,.0f}/yr expenses. "
+    + (
+        f"Because your budget includes a ${_mortgage_annual:,.0f}/yr mortgage, the FIRE timeline uses a "
+        f"cashflow model: higher threshold (spending+mortgage) during the loan term, "
+        f"dropping to ${_fire_number_post_payoff:,.0f} once paid off at year {_mort_po_yr}."
+        if _has_mort_data else ""
+    )
+)
 m4.metric(
     f"FIRE Number ({swr*100:.1f}% SWR)",
     f"${fire_number:,.0f}",
-    help=f"Portfolio needed so {swr*100:.1f}% annual withdrawal covers your ${annual_spending:,.0f}/yr expenses.",
+    help=_fire_num_help,
 )
 
 # Per-partner breakdown (visible in couple mode only)
@@ -403,9 +413,91 @@ st.subheader("Path to Financial Independence")
 
 real_return = (1 + portfolio_return) / (1 + inflation_rate) - 1
 
+if bool(profile.get("pf_kids_enabled")):
+    _nk   = int(profile.get("pf_num_kids") or 2)
+    _nkst = {1: "1 child", 2: "2 children", 3: "3 children"}.get(_nk, "children")
+    st.info(
+        f"👶 **Kids plan active** — {_nkst}, "
+        f"{kids_cost_label(str(profile.get('pf_kids_schooling') or 'public'))} schooling. "
+        "Kids costs reduce investable savings each year in the FIRE timeline below. "
+        "Configure on the **Kids & Family** page."
+    )
+
 # Preservation age and current age — used to gate illiquid super in the FIRE timeline
 _current_age = int(profile.get("pf_age") or 30)
 _pres_age    = preservation_age(int(profile.get("pf_birth_year") or (2026 - _current_age)))
+
+# Mortgage timing — used to compute a cashflow-based PV target in years_to_fire().
+# If mortgage data exists: target during mortgage years = PV(spending+mortgage for n yrs)
+#                                                        + PV(spending_only_number at payoff)
+# When n=0 (paid off), target falls back to spending_only_number (lower than fire_number).
+_mort_p_yr   = int(profile.get("pf_purchase_years_from_now") or 0)   # 0 = already paying
+_mort_term   = int(profile.get("pf_loan_term_years") or 0)
+_mort_po_yr  = _mort_p_yr + _mort_term                                # projection year of payoff
+_has_mort_data = (
+    _pf_wants_purchase
+    and _pf_mortgage_monthly is not None
+    and _mort_term > 0
+    and _mort_po_yr > 0
+)
+_mortgage_annual = float(_pf_mortgage_monthly) * 12.0 if _has_mort_data else 0.0
+
+# Spending after mortgage is paid (the long-run lower spending target)
+_spending_post_payoff = max(annual_spending - _mortgage_annual, annual_spending * 0.5)
+_fire_number_post_payoff = _spending_post_payoff / swr if swr > 0 else 0.0
+
+_real_r_pv = max(real_return, 0.01)   # keep positive so PV formula is well-defined
+
+
+# Pre-compute the gross withdrawal needed during the mortgage phase (computed once, not per call)
+_high_gross_budget = (
+    gross_withdrawal_for_net_spend(annual_spending + _mortgage_annual)
+    if _has_mort_data else 0.0
+)
+
+# Kids annual costs — read from profile if kids plan is active
+_kids_enabled_budget = bool(profile.get("pf_kids_enabled"))
+_kids_annual_budget: dict[int, float] = {}
+if _kids_enabled_budget:
+    _k_births_b = [
+        int(profile.get("pf_kid1_birth_yr_from_now") or 3),
+        int(profile.get("pf_kid2_birth_yr_from_now") or 6),
+        int(profile.get("pf_kid3_birth_yr_from_now") or 9),
+    ]
+    _kcs = compute_kids_costs(
+        num_kids=int(profile.get("pf_num_kids") or 2),
+        birth_yrs_from_now=_k_births_b,
+        schooling=str(profile.get("pf_kids_schooling") or "public"),
+        private_school_annual=float(profile.get("pf_kids_private_school_annual") or 20_000),
+        private_highschool_annual=float(profile.get("pf_kids_private_highschool_annual") or 30_000),
+        childcare_annual_per_child=float(profile.get("pf_kids_childcare_annual") or 12_000),
+        setup_cost_per_child=float(profile.get("pf_kids_setup_cost") or 7_500),
+        gross_income=float(gross_income),
+        partner_gross_income=float(p_gross_income if _partnered else 0),
+        leave_weeks=int(profile.get("pf_parental_leave_weeks") or 18),
+        partner_leave_weeks=int(profile.get("pf_parental_leave_partner_weeks") or 4),
+        leave_income_pct=float(profile.get("pf_parental_leave_income_pct") or 50),
+        bigger_house_monthly_extra=float(profile.get("pf_kids_bigger_house_extra_monthly") or 0),
+        partner_career_break_years=int(profile.get("pf_partner_career_break_years") or 0),
+        horizon=82,
+    )
+    _kids_annual_budget = _kcs.as_dict()
+
+
+def _cashflow_target_at_yr(yr: int) -> float:
+    """Cashflow-based FIRE target at projection year yr.
+
+    Matches FIRE Scenarios logic: PV of elevated spending (living + mortgage) for n remaining
+    mortgage years plus PV of the post-payoff SWR number, all in real dollars.
+    When no mortgage (or already paid), returns the standard fire_number.
+    """
+    if not _has_mort_data:
+        return fire_number
+    n = max(_mort_po_yr - yr, 0) if yr >= _mort_p_yr else 0
+    if n == 0:
+        return _fire_number_post_payoff
+    r = _real_r_pv
+    return _high_gross_budget * (1.0 - (1.0 + r) ** (-n)) / r + _fire_number_post_payoff / (1.0 + r) ** n
 
 
 def years_to_fire(save_rate: float) -> float | None:
@@ -415,6 +507,7 @@ def years_to_fire(save_rate: float) -> float | None:
     - Target is fire_number (annual_spending / swr), not annual_income / swr (#3).
     - Super is only counted once the user reaches preservation age (#4).
     - Super contributions grow with income growth (approximating rising SG on rising salary) (#11).
+    - Target is cashflow-based: accounts for remaining mortgage repayments at each projection year.
     """
     if save_rate <= 0:
         return None
@@ -425,13 +518,16 @@ def years_to_fire(save_rate: float) -> float | None:
     for yr in range(1, 81):
         annual_inc    *= (1 + income_growth)
         annual_save    = annual_inc * save_rate
+        # Deduct kids costs from investable savings for this year
+        kids_cost_yr   = _kids_annual_budget.get(yr, 0.0)
+        annual_save    = max(annual_save - kids_cost_yr, 0.0)
         portfolio      = portfolio * (1 + portfolio_return) + annual_save
         super_bal_val  = super_bal_val * (1 + portfolio_return) + current_sg
         current_sg    *= (1 + income_growth)       # SG is % of salary — grows with income
         # Super only accessible at preservation age; exclude it before then
         accessible_super = super_bal_val if (_current_age + yr) >= _pres_age else 0.0
         combined = portfolio + accessible_super
-        if combined >= fire_number:                 # target = spending / swr, not income / swr
+        if combined >= _cashflow_target_at_yr(yr):
             return yr
     return None
 
@@ -584,6 +680,7 @@ with st.expander("📋 Methodology & Assumptions"):
 Super is gated behind your preservation age ({_pres_age}) — it is only counted once you reach
 that age. Super contributions in the timeline grow annually with income growth, approximating
 the rising SG on a growing salary.
+{"**Mortgage adjustment:** the timeline uses a cashflow PV model — the required portfolio at each year accounts for the remaining mortgage repayments (${:,.0f}/yr) plus the lower post-payoff spending number (${:,.0f}) at payoff year {}.".format(_mortgage_annual, _fire_number_post_payoff, _mort_po_yr) if _has_mort_data else ""}
 
 **Tax** uses 2024-25 Australian brackets with Stage 3 cuts, LITO, Medicare levy, MLS, and HECS.
 

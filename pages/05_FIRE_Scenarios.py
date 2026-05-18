@@ -1,6 +1,7 @@
 """FIRE Scenarios — Coast/Lean/Fat/Barista crossover analysis."""
 from __future__ import annotations
 import math
+import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -14,6 +15,7 @@ from engines.calculation_engine import (
 )
 from engines.tax_engine import gross_withdrawal_for_net_spend
 from utils import shared_profile as profile
+from utils.kids_engine import compute_kids_costs, kids_cost_label
 
 st.set_page_config(page_title="FIRE Scenarios", page_icon="🎯", layout="wide")
 profile.init()
@@ -166,11 +168,55 @@ if not selected:
     st.error("Select at least one strategy.")
     st.stop()
 
+# ── Kids cost overrides (if kids plan is active in profile) ──────────────────
+_kids_enabled = bool(profile.get("pf_kids_enabled"))
+_kids_annual_costs: dict[int, float] = {}
+
+if _kids_enabled:
+    _num_kids     = int(profile.get("pf_num_kids") or 2)
+    _k_births     = [
+        int(profile.get("pf_kid1_birth_yr_from_now") or 3),
+        int(profile.get("pf_kid2_birth_yr_from_now") or 6),
+        int(profile.get("pf_kid3_birth_yr_from_now") or 9),
+    ]
+    _kids_costs_series = compute_kids_costs(
+        num_kids=_num_kids,
+        birth_yrs_from_now=_k_births,
+        schooling=str(profile.get("pf_kids_schooling") or "public"),
+        private_school_annual=float(profile.get("pf_kids_private_school_annual") or 20_000),
+        private_highschool_annual=float(profile.get("pf_kids_private_highschool_annual") or 30_000),
+        childcare_annual_per_child=float(profile.get("pf_kids_childcare_annual") or 12_000),
+        setup_cost_per_child=float(profile.get("pf_kids_setup_cost") or 7_500),
+        gross_income=float(profile.get("pf_gross_income") or 110_000),
+        partner_gross_income=float(profile.get("pf_partner_gross_income") or 0),
+        leave_weeks=int(profile.get("pf_parental_leave_weeks") or 18),
+        partner_leave_weeks=int(profile.get("pf_parental_leave_partner_weeks") or 4),
+        leave_income_pct=float(profile.get("pf_parental_leave_income_pct") or 50),
+        bigger_house_monthly_extra=float(profile.get("pf_kids_bigger_house_extra_monthly") or 0),
+        partner_career_break_years=int(profile.get("pf_partner_career_break_years") or 0),
+        horizon=horizon_years + 1,
+    )
+    _kids_annual_costs = _kids_costs_series.as_dict()
+
 proj_df = run_yearly_projection(
     data.cagr_df, selected, portfolio, dca_method, dca_value, dca_grows, stop_at_coast,
     salary_growth, salary, horizon_years, "Decimal (0.05 = 5%)", inflation_rate, True,
     return_percentile=return_percentile,
+    annual_cost_overrides=_kids_annual_costs if _kids_enabled else None,
 )
+
+if _kids_enabled and _kids_annual_costs:
+    _peak_kids_yr   = max(_kids_annual_costs, key=_kids_annual_costs.get)
+    _peak_kids_cost = _kids_annual_costs[_peak_kids_yr]
+    _num_kids_str   = {1: "1 child", 2: "2 children", 3: "3 children"}.get(
+        int(profile.get("pf_num_kids") or 2), "children"
+    )
+    st.info(
+        f"👶 **Kids plan active** — {_num_kids_str}, "
+        f"{kids_cost_label(str(profile.get('pf_kids_schooling') or 'public'))} schooling. "
+        f"Annual kids costs are deducted from DCA each year (peak: **${_peak_kids_cost:,.0f}/yr** "
+        f"at year {_peak_kids_yr}). Configure on the **Kids & Family** page."
+    )
 
 lean_num    = lean_fire_target(lean_spending, swr)
 fat_num     = fat_fire_target(fat_spending, swr)
@@ -218,6 +264,19 @@ median_num_adj  = median_gross  / swr
 fat_num_adj     = fat_gross     / swr
 barista_num_adj = barista_gross / swr
 
+# Mortgage-active gross withdrawals: spending + full P&I repayment must come from the portfolio.
+# The gross amount is higher because mortgage repayments are a post-tax cashflow obligation.
+if _has_mortgage_data and _pf_mortgage_monthly is not None:
+    _mortgage_annual_repayment = float(_pf_mortgage_monthly) * 12.0
+    lean_gross_mort   = gross_withdrawal_for_net_spend(lean_spending   + _mortgage_annual_repayment)
+    median_gross_mort = gross_withdrawal_for_net_spend(median_spending + _mortgage_annual_repayment)
+    fat_gross_mort    = gross_withdrawal_for_net_spend(fat_spending    + _mortgage_annual_repayment)
+else:
+    _mortgage_annual_repayment = 0.0
+    lean_gross_mort = lean_gross
+    median_gross_mort = median_gross
+    fat_gross_mort = fat_gross
+
 # Projected age to reach each FIRE target - find best (earliest) strategy
 def _best_fire_age(target: float) -> tuple[int | None, str | None]:
     candidates = [(fire_age(current_age, proj_df, target, s), s) for s in selected]
@@ -231,27 +290,72 @@ median_age,  median_strat  = _best_fire_age(median_num_adj)
 fat_age,     fat_strat     = _best_fire_age(fat_num_adj)
 barista_age, barista_strat = _best_fire_age(barista_num_adj)
 
-# Mortgage-adjusted crossover: portfolio must also cover the remaining loan balance.
-# The effective target at year Y = FIRE_number + real_mortgage_balance(Y).
-# This threshold decreases year-by-year and hits the standard FIRE_number once paid off.
-def _best_mort_adj_fire_age(target: float) -> tuple[int | None, str | None]:
+# Real portfolio return at the selected percentile — used for PV discounting in the
+# cashflow-based mortgage-adjusted threshold.
+if median_strat and median_strat in data.cagr_df.columns:
+    _pv_arr = pd.to_numeric(data.cagr_df[median_strat], errors="coerce").dropna().to_numpy(dtype=float)
+    _pv_nom_r = float(np.percentile(_pv_arr, return_percentile)) if len(_pv_arr) else 0.07
+else:
+    _pv_nom_r = 0.07
+_real_r_for_pv = max((1.0 + _pv_nom_r) / (1.0 + float(inflation_rate) / 100.0) - 1.0, 0.01)
+
+
+def _cashflow_mort_threshold(yr: int, base_target: float, high_gross: float) -> float:
+    """
+    Cashflow-based FIRE threshold at projection year yr.
+
+    The portfolio must sustain:
+      - Phase 1 (n remaining mortgage years): withdraw high_gross/yr
+        (living expenses + mortgage P&I repayments, after-tax gross-up)
+      - Phase 2 (post payoff, in perpetuity): withdraw base_target * swr /yr
+        (standard SWR on base_target portfolio)
+
+    Required portfolio = PV(annuity of high_gross for n years at real r)
+                       + PV(base_target lump sum at year n, discounted at real r)
+
+    When n = 0 (mortgage paid off or not yet started), reduces to base_target.
+    """
+    if not _has_mortgage_data:
+        return base_target
+    _p_yr_l  = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
+    _po_yr_l = _p_yr_l + int(_pf_loan_term_years)
+    n = max(_po_yr_l - yr, 0) if yr >= _p_yr_l else 0
+    if n == 0:
+        return base_target
+    r = _real_r_for_pv
+    if abs(r) < 1e-9:
+        return high_gross * n + base_target
+    return high_gross * (1.0 - (1.0 + r) ** (-n)) / r + base_target / (1.0 + r) ** n
+
+
+def _best_mort_adj_fire_age(
+    base_target: float,
+    high_gross: float,
+) -> tuple[int | None, str | None]:
+    """
+    Find the earliest FIRE age where the projected portfolio meets the cashflow-based
+    mortgage-adjusted threshold. The threshold uses PV discounting to account for the
+    elevated withdrawal (spending + mortgage repayments) during the remaining mortgage
+    period, then the standard SWR portfolio requirement at payoff.
+    """
     candidates = []
     for s in selected:
         col = f"{s}_Total"
         if col not in proj_df.columns:
             continue
         for yr, port in enumerate(proj_df[col]):
-            if float(port) >= target + _real_mort_balance(yr):
+            if float(port) >= _cashflow_mort_threshold(yr, base_target, high_gross):
                 candidates.append((current_age + yr, s))
                 break
     if not candidates:
         return None, None
     return min(candidates, key=lambda x: x[0])
 
+
 if _has_mortgage_data:
-    median_age_adj, median_strat_adj = _best_mort_adj_fire_age(median_num_adj)
-    lean_age_adj,   _                = _best_mort_adj_fire_age(lean_num_adj)
-    fat_age_adj,    _                = _best_mort_adj_fire_age(fat_num_adj)
+    median_age_adj, median_strat_adj = _best_mort_adj_fire_age(median_num_adj, median_gross_mort)
+    lean_age_adj,   _                = _best_mort_adj_fire_age(lean_num_adj,   lean_gross_mort)
+    fat_age_adj,    _                = _best_mort_adj_fire_age(fat_num_adj,    fat_gross_mort)
 else:
     median_age_adj = median_strat_adj = lean_age_adj = fat_age_adj = None
 
@@ -292,15 +396,28 @@ st.caption(
 if _has_mortgage_data:
     _p_yr  = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
     _po_yr = _p_yr + int(_pf_loan_term_years)
+    _payoff_age = current_age + _po_yr
 
-    # Balance remaining at each candidate FIRE age
-    _bal_at_median = _real_mort_balance(median_age - current_age) if median_age else 0
-    _bal_at_lean   = _real_mort_balance(lean_age   - current_age) if lean_age   else 0
-    _bal_at_fat    = _real_mort_balance(fat_age    - current_age) if fat_age    else 0
+    _delay_med  = (median_age_adj - median_age) if (median_age_adj and median_age) else None
+    _delay_lean = (lean_age_adj   - lean_age)   if (lean_age_adj   and lean_age)   else None
+    _delay_fat  = (fat_age_adj    - fat_age)    if (fat_age_adj    and fat_age)    else None
 
-    _delay_med = (median_age_adj - median_age) if (median_age_adj and median_age) else None
-    _delay_lean = (lean_age_adj  - lean_age)   if (lean_age_adj   and lean_age)   else None
-    _delay_fat  = (fat_age_adj   - fat_age)    if (fat_age_adj    and fat_age)    else None
+    # Portfolio threshold at each adjusted FIRE age (for display in metrics)
+    def _threshold_at_age(adj_age, base_target, high_gross):
+        if adj_age is None:
+            return None
+        return _cashflow_mort_threshold(adj_age - current_age, base_target, high_gross)
+
+    _thresh_lean   = _threshold_at_age(lean_age_adj,   lean_num_adj,   lean_gross_mort)
+    _thresh_median = _threshold_at_age(median_age_adj, median_num_adj, median_gross_mort)
+    _thresh_fat    = _threshold_at_age(fat_age_adj,    fat_num_adj,    fat_gross_mort)
+
+    # Remaining mortgage years at each adjusted FIRE age
+    def _mort_yrs_at_adj_age(adj_age):
+        if adj_age is None:
+            return 0
+        yr = adj_age - current_age
+        return max(_po_yr - yr, 0) if yr >= _p_yr else 0
 
     adj_a, adj_b, adj_c = st.columns(3)
     adj_a.metric(
@@ -309,8 +426,13 @@ if _has_mortgage_data:
         delta=(f"+{_delay_lean} yr vs unadjusted" if (_delay_lean and _delay_lean > 0)
                else ("No delay — mortgage paid before Lean FIRE" if _delay_lean == 0 else None)),
         delta_color="inverse" if (_delay_lean and _delay_lean > 0) else "normal",
-        help=(f"Mortgage adds ${_bal_at_lean:,.0f} to the required portfolio at unadjusted Lean FIRE age ({lean_age})."
-              if lean_age else ""),
+        help=(
+            f"Required portfolio at age {lean_age_adj}: ~${_thresh_lean:,.0f} "
+            f"({_mort_yrs_at_adj_age(lean_age_adj)} mortgage years remaining · "
+            f"${lean_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
+            f"gross withdrawal ${lean_gross_mort:,.0f}/yr). "
+            f"Drops to ${lean_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
+        ) if lean_age_adj else "",
     )
     adj_b.metric(
         "Your FIRE (Mortgage-Adjusted)",
@@ -318,11 +440,13 @@ if _has_mortgage_data:
         delta=(f"+{_delay_med} yr vs unadjusted" if (_delay_med and _delay_med > 0)
                else ("No delay — mortgage paid before FIRE" if _delay_med == 0 else None)),
         delta_color="inverse" if (_delay_med and _delay_med > 0) else "normal",
-        help=(f"At unadjusted FIRE age ({median_age}), ${_bal_at_median:,.0f} mortgage balance "
-              f"still outstanding. Portfolio must be ${median_num_adj + _bal_at_median:,.0f} "
-              f"(= ${median_num_adj:,.0f} FIRE number + ${_bal_at_median:,.0f} mortgage) "
-              f"before you can truly retire."
-              if median_age else ""),
+        help=(
+            f"Required portfolio at age {median_age_adj}: ~${_thresh_median:,.0f} "
+            f"({_mort_yrs_at_adj_age(median_age_adj)} mortgage years remaining · "
+            f"${median_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
+            f"gross withdrawal ${median_gross_mort:,.0f}/yr). "
+            f"Drops to ${median_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
+        ) if median_age_adj else "",
     )
     adj_c.metric(
         "Fat FIRE (Mortgage-Adjusted)",
@@ -330,14 +454,21 @@ if _has_mortgage_data:
         delta=(f"+{_delay_fat} yr vs unadjusted" if (_delay_fat and _delay_fat > 0)
                else ("No delay — mortgage paid before Fat FIRE" if _delay_fat == 0 else None)),
         delta_color="inverse" if (_delay_fat and _delay_fat > 0) else "normal",
-        help=(f"Mortgage adds ${_bal_at_fat:,.0f} to the required portfolio at unadjusted Fat FIRE age ({fat_age})."
-              if fat_age else ""),
+        help=(
+            f"Required portfolio at age {fat_age_adj}: ~${_thresh_fat:,.0f} "
+            f"({_mort_yrs_at_adj_age(fat_age_adj)} mortgage years remaining · "
+            f"${fat_spending + _mortgage_annual_repayment:,.0f}/yr total spending during mortgage · "
+            f"gross withdrawal ${fat_gross_mort:,.0f}/yr). "
+            f"Drops to ${fat_num_adj:,.0f} once mortgage paid off at age {_payoff_age}."
+        ) if fat_age_adj else "",
     )
     st.caption(
-        f"🏠 **How mortgage-adjusted FIRE works:** your portfolio must cover **both** the SWR-based "
-        f"spending number and the remaining loan balance at the point of retirement. "
-        f"The required threshold decreases each year as the mortgage is paid down, "
-        f"reaching the standard FIRE number at mortgage payoff (age {current_age + _po_yr})."
+        f"🏠 **How mortgage-adjusted FIRE works:** the portfolio must support your spending "
+        f"**plus** ongoing mortgage repayments (${_mortgage_annual_repayment:,.0f}/yr) for the "
+        f"remaining loan term, then spending alone in perpetuity. "
+        f"The threshold uses a cashflow PV model — discounting the elevated withdrawal phase "
+        f"and the terminal SWR portfolio to the FIRE date at the real portfolio return. "
+        f"Mortgage fully paid at age {_payoff_age}, after which the standard FIRE number applies."
     )
 
 st.divider()
@@ -352,10 +483,11 @@ fig.add_trace(go.Scatter(x=ages, y=proj_df["Yearly_DCA"], name="Annual DCA",
                           line=dict(color=COLORS["soft_yellow"], width=2, dash="dot"),
                           hovertemplate="DCA: $%{y:,.0f}<extra></extra>"))
 
-# Mortgage-adjusted FIRE target: a line that starts at FIRE_number + full_loan_balance
-# and decreases year-by-year to FIRE_number once the mortgage is paid off.
+# Cashflow-based mortgage-adjusted FIRE target: PV of elevated spending phase + terminal SWR portfolio.
+# Starts higher than the standard FIRE number, decreases year-by-year, and equals median_num_adj
+# once the mortgage is paid off.
 if _has_mortgage_data:
-    _adj_targets = [median_num_adj + _real_mort_balance(yr) for yr in range(len(proj_df))]
+    _adj_targets = [_cashflow_mort_threshold(yr, median_num_adj, median_gross_mort) for yr in range(len(proj_df))]
     fig.add_trace(go.Scatter(
         x=ages, y=_adj_targets,
         name="Mortgage-Adjusted FIRE Target",
