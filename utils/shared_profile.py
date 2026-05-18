@@ -21,22 +21,24 @@ import streamlit as st
 # ── Default values (used if profile hasn't been set) ──────────────────────────
 PROFILE_DEFAULTS: dict[str, object] = {
     # Personal (you)
-    "pf_age":              30,
+    "pf_age":              25,
     "pf_retirement_age":   65,
-    "pf_birth_year":       1996,  # 2026 - 30 (default age)
+    "pf_birth_year":       2001,  # 2026 - 25 (default age)
     # Income (you)
-    "pf_gross_income":     110_000,
-    "pf_hecs_balance":     20_000,
+    "pf_gross_income":     105_000,
+    "pf_hecs_balance":     0,
     "pf_private_cover":    False,
     # Wealth (household-level, kept joint for simplicity)
-    "pf_portfolio":        40_000,   # investable assets, excl. super and property
-    "pf_super_balance":    75_000,   # YOUR super only when partnered (see helpers)
+    # Portfolio = all investable assets incl. cash savings, excl. super and property.
+    # You: $75K invested + $30K savings; Partner: $0 invested + $70K savings = $175K total.
+    "pf_portfolio":        175_000,
+    "pf_super_balance":    50_000,   # YOUR super only when partnered (see helpers)
     # Partner (Australian tax is individual, so partner fields are tracked separately)
-    "pf_partner_enabled":          False,
-    "pf_partner_age":              30,
-    "pf_partner_gross_income":     85_000,
-    "pf_partner_hecs_balance":     0,
-    "pf_partner_super_balance":    50_000,
+    "pf_partner_enabled":          True,
+    "pf_partner_age":              26,
+    "pf_partner_gross_income":     150_000,  # $130K base + $20K bonus (pre-tax)
+    "pf_partner_hecs_balance":     30_000,
+    "pf_partner_super_balance":    75_000,
     "pf_partner_private_cover":    False,
     # Assumptions (household-level)
     "pf_inflation":        2.5,      # % per year

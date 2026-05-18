@@ -198,11 +198,35 @@ if _kids_enabled:
     )
     _kids_annual_costs = _kids_costs_series.as_dict()
 
+# ── Mortgage payoff DCA boost overrides ──────────────────────────────────────
+# The starting DCA (investable surplus) is already net of the mortgage repayment.
+# When the mortgage is fully paid off, that repayment is freed up and redirected
+# to investments. We model this as a *negative* cost override (a DCA boost) for
+# all projection years from payoff onward. This is in today's real AUD; the engine
+# inflates it to nominal before applying, keeping the boost inflation-indexed.
+_mort_payoff_boost: dict[int, float] = {}
+_m_purchase_yr = int(_pf_purchase_yrs) if _pf_purchase_yrs is not None else 0
+_m_payoff_yr   = _m_purchase_yr + int(_pf_loan_term_years or 0)
+_m_monthly_real = float(_pf_mortgage_monthly) if _pf_mortgage_monthly is not None else 0.0
+
+if _has_mortgage_data and _m_monthly_real > 0 and _m_payoff_yr > 0:
+    for yr in range(_m_payoff_yr, horizon_years + 1):
+        _mort_payoff_boost[yr] = -_m_monthly_real * 12.0  # negative = boost
+
+# Merge kids costs (positive = reduction) + mortgage payoff (negative = boost).
+# Net of both gives the true annual DCA adjustment at each projection year.
+_combined_overrides: dict[int, float] = {}
+_all_override_yrs = set(_kids_annual_costs.keys()) | set(_mort_payoff_boost.keys())
+for _ov_yr in _all_override_yrs:
+    _net = _kids_annual_costs.get(_ov_yr, 0.0) + _mort_payoff_boost.get(_ov_yr, 0.0)
+    if _net != 0.0:
+        _combined_overrides[_ov_yr] = _net
+
 proj_df = run_yearly_projection(
     data.cagr_df, selected, portfolio, dca_method, dca_value, dca_grows, stop_at_coast,
     salary_growth, salary, horizon_years, "Decimal (0.05 = 5%)", inflation_rate, True,
     return_percentile=return_percentile,
-    annual_cost_overrides=_kids_annual_costs if _kids_enabled else None,
+    annual_cost_overrides=_combined_overrides or None,
 )
 
 if _kids_enabled and _kids_annual_costs:
@@ -218,113 +242,216 @@ if _kids_enabled and _kids_annual_costs:
         f"at year {_peak_kids_yr}, age {current_age + _peak_kids_yr}). Configure on the **Kids & Family** page."
     )
 
-    # ── DCA Impact chart: shows how kids costs dent investment contributions ──
-    # The main Double Crossover chart's scale ($0–$3M+) makes a $10–30k DCA dip
-    # invisible. This focused chart zooms into the DCA story.
+# ── Combined DCA Impact chart (mortgage + kids) ───────────────────────────────
+# Shown whenever at least one of mortgage or kids is active.
+# The main Double Crossover chart's scale ($0–$3M+) makes DCA changes invisible.
+# This chart zooms into the contribution story: what's the ceiling, what eats into
+# it, and what actually reaches the portfolio each year.
+_show_dca_impact = _kids_enabled or _has_mortgage_data
+
+if _show_dca_impact:
     _dca_years = list(proj_df["Year"])
     _dca_ages  = [current_age + y for y in _dca_years]
 
-    # Effective DCA (after kids reduction) — already in proj_df in real AUD
-    _eff_dca   = list(proj_df["Yearly_DCA"])
+    # Effective DCA at each year in real AUD (post all adjustments, from engine).
+    _eff_dca = list(proj_df["Yearly_DCA"])
 
-    # Kids cost at each year, converted to real AUD for chart display.
-    # The engine now stores real costs and inflates to nominal internally, so for
-    # the chart (which is in real AUD) we keep costs in real terms.
+    # Kids cost per year in real AUD (positive → reduces DCA).
     _kids_yr_costs_real = [_kids_annual_costs.get(yr, 0.0) for yr in _dca_years]
 
-    # Base DCA (what would have been invested without kids costs):
-    # proj_df["Yearly_DCA"] is already real; the engine subtracted nominal kids cost
-    # and then deflated.  The equivalent real kids cost deducted = real_cost * (inf^yr / inf^yr) = real_cost.
-    # So: base_real = effective_real + real_kids_cost.
-    _base_dca_real = [eff + kids for eff, kids in zip(_eff_dca, _kids_yr_costs_real)]
+    # Mortgage cost per year for the chart: the repayment that's already been
+    # deducted from the investable surplus (i.e., not available for investment)
+    # during the mortgage window. After payoff the mortgage bar is 0 — those
+    # dollars flow back into the effective DCA via the boost override above.
+    _mort_yr_costs_real = [
+        _m_monthly_real * 12.0
+        if (_has_mortgage_data and _m_purchase_yr <= yr < _m_payoff_yr)
+        else 0.0
+        for yr in _dca_years
+    ]
 
-    # Lifetime investment foregone in real AUD
-    _total_kids_dca_lost = sum(_kids_yr_costs_real)
-    _kids_last_yr = max(_kids_annual_costs.keys())
+    # Full potential ceiling: effective DCA plus everything that's been deducted.
+    # This is the maximum that *could* be invested if there were no mortgage and
+    # no kids costs in a given year.
+    _ceiling_dca = [
+        eff + kids + mort
+        for eff, kids, mort in zip(_eff_dca, _kids_yr_costs_real, _mort_yr_costs_real)
+    ]
 
-    with st.expander("📉 Kids Impact on Investment Contributions", expanded=True):
-        ki1, ki2, ki3 = st.columns(3)
-        ki1.metric(
-            "Peak Annual DCA Reduction",
-            f"${_peak_kids_cost:,.0f}",
-            f"Age {current_age + _peak_kids_yr}",
-            delta_color="inverse",
-            help="The year when kids costs hit their highest, reducing your annual investment contribution by this amount.",
-        )
-        _eff_at_peak = _eff_dca[_peak_kids_yr] if _peak_kids_yr < len(_eff_dca) else 0
-        ki2.metric(
-            "Effective DCA at Peak",
-            f"${_eff_at_peak:,.0f}/yr",
-            f"vs ${_base_dca_real[_peak_kids_yr]:,.0f}/yr without kids",
-            delta_color="inverse",
-            help="What you actually invest per year at peak kids cost vs what you'd invest without kids.",
-        )
-        ki3.metric(
-            "Total Investment Foregone (Real)",
-            f"${_total_kids_dca_lost:,.0f}",
-            f"Recovered after age {current_age + _kids_last_yr}",
-            delta_color="off",
-            help="Sum of all annual DCA reductions across the kids' childhood in today's dollars. "
-                 "This is the direct opportunity cost — the compounding effect on the portfolio is larger.",
-        )
+    _total_kids_dca_lost  = sum(_kids_yr_costs_real)
+    _total_mort_dca_cost  = sum(_mort_yr_costs_real)
+    _kids_last_yr = max(_kids_annual_costs.keys()) if _kids_annual_costs else 0
 
+    # ── Labels depending on which drags are active ──
+    if _kids_enabled and _has_mortgage_data:
+        _chart_title  = "📉 Investment Contributions: Mortgage & Kids Impact"
+        _eff_dca_name = "Effective DCA (after mortgage + kids)"
+        _ceiling_name = "Ceiling DCA (no mortgage, no kids)"
+    elif _has_mortgage_data:
+        _chart_title  = "📉 Investment Contributions: Mortgage Impact"
+        _eff_dca_name = "Effective DCA (after mortgage)"
+        _ceiling_name = "Ceiling DCA (no mortgage)"
+    else:
+        _chart_title  = "📉 Investment Contributions: Kids Impact"
+        _eff_dca_name = "Effective DCA (after kids)"
+        _ceiling_name = "Ceiling DCA (no kids)"
+
+    with st.expander(_chart_title, expanded=True):
+        # ── Summary metrics ──────────────────────────────────────────────────
+        _met_cols = st.columns(3)
+
+        if _has_mortgage_data and _m_monthly_real > 0:
+            _mort_payoff_age = current_age + _m_payoff_yr
+            _met_cols[0].metric(
+                "Mortgage Repayment (Annual)",
+                f"${_m_monthly_real * 12:,.0f}/yr",
+                f"Freed at age {_mort_payoff_age} → DCA boost",
+                delta_color="inverse",
+                help=(
+                    f"${_m_monthly_real:,.0f}/mo is locked in mortgage repayments and can't be invested. "
+                    f"After payoff at age {_mort_payoff_age}, this amount automatically redirects to investments, "
+                    "boosting your annual DCA."
+                ),
+            )
+        else:
+            _met_cols[0].metric("Mortgage Impact", "Not active", "No mortgage data exported")
+
+        if _kids_enabled and _kids_annual_costs:
+            _peak_kids_yr   = max(_kids_annual_costs, key=_kids_annual_costs.get)
+            _peak_kids_cost = _kids_annual_costs[_peak_kids_yr]
+            _eff_at_peak    = _eff_dca[_peak_kids_yr] if _peak_kids_yr < len(_eff_dca) else 0
+            _met_cols[1].metric(
+                "Peak Kids DCA Reduction",
+                f"${_peak_kids_cost:,.0f}/yr",
+                f"Age {current_age + _peak_kids_yr}",
+                delta_color="inverse",
+                help="The year when kids costs are highest, reducing annual investment contributions by this amount.",
+            )
+            _met_cols[2].metric(
+                "Total Foregone (Real)",
+                f"${_total_kids_dca_lost + _total_mort_dca_cost:,.0f}",
+                (f"Kids free by age {current_age + _kids_last_yr}"
+                 if _kids_last_yr else "Ongoing"),
+                delta_color="off",
+                help=(
+                    "Combined real-dollar investment opportunity cost: "
+                    f"${_total_mort_dca_cost:,.0f} from mortgage repayments + "
+                    f"${_total_kids_dca_lost:,.0f} from kids costs. "
+                    "Compounding magnifies the actual portfolio impact beyond this number."
+                ),
+            )
+        else:
+            _met_cols[1].metric("Kids Impact", "Not active", "No kids plan configured")
+            _met_cols[2].metric(
+                "Total Mortgage Foregone",
+                f"${_total_mort_dca_cost:,.0f}",
+                "Across full mortgage term (real AUD)",
+                delta_color="off",
+            )
+
+        # ── Chart ────────────────────────────────────────────────────────────
         fig_dca = go.Figure()
-        # Base DCA (without kids) — what could have been invested
+
+        # Ceiling — maximum potential if no obligations
         fig_dca.add_trace(go.Scatter(
-            x=_dca_ages, y=_base_dca_real,
-            name="DCA Without Kids",
+            x=_dca_ages, y=_ceiling_dca,
+            name=_ceiling_name,
             line=dict(color=COLORS["soft_yellow"], width=2, dash="dot"),
-            hovertemplate="Age %{x}<br>DCA (no kids): $%{y:,.0f}/yr<extra></extra>",
+            hovertemplate="Age %{x}<br>Ceiling DCA: $%{y:,.0f}/yr<extra></extra>",
         ))
-        # Kids cost reduction — red fill showing what's lost to kids
-        fig_dca.add_trace(go.Bar(
-            x=_dca_ages, y=_kids_yr_costs_real,
-            name="Kids Costs (DCA reduction)",
-            marker_color="rgba(168,72,72,0.45)",
-            hovertemplate="Age %{x}<br>Kids cost: $%{y:,.0f}/yr<extra></extra>",
-        ))
-        # Effective DCA (what actually gets invested)
+
+        # Mortgage layer — orange bars for the portion locked in repayments
+        if _has_mortgage_data and any(v > 0 for v in _mort_yr_costs_real):
+            fig_dca.add_trace(go.Bar(
+                x=_dca_ages, y=_mort_yr_costs_real,
+                name="Mortgage Repayments (locked)",
+                marker_color="rgba(210,120,40,0.5)",
+                hovertemplate="Age %{x}<br>Mortgage: $%{y:,.0f}/yr<extra></extra>",
+            ))
+
+        # Kids layer — red bars for the portion consumed by kids
+        if _kids_enabled and any(v > 0 for v in _kids_yr_costs_real):
+            fig_dca.add_trace(go.Bar(
+                x=_dca_ages, y=_kids_yr_costs_real,
+                name="Kids Costs (DCA reduction)",
+                marker_color="rgba(168,72,72,0.45)",
+                hovertemplate="Age %{x}<br>Kids cost: $%{y:,.0f}/yr<extra></extra>",
+            ))
+
+        # Effective DCA — what actually reaches the portfolio
         fig_dca.add_trace(go.Scatter(
             x=_dca_ages, y=_eff_dca,
-            name="Effective DCA (after kids)",
+            name=_eff_dca_name,
             line=dict(color=COLORS["blue"], width=3),
             fill="tozeroy",
             fillcolor="rgba(66,117,160,0.12)",
             hovertemplate="Age %{x}<br>Effective DCA: $%{y:,.0f}/yr<extra></extra>",
         ))
 
-        # Vertical lines at kids' birth years
-        for _k_yr_key, _k_pf_key in enumerate(
-            ["pf_kid1_birth_yr_from_now", "pf_kid2_birth_yr_from_now", "pf_kid3_birth_yr_from_now"],
-            start=1
-        ):
-            if _k_yr_key > int(profile.get("pf_num_kids") or 2):
-                break
-            _k_birth_yr = int(profile.get(_k_pf_key) or (_k_yr_key * 3))
-            if 0 <= _k_birth_yr <= horizon_years:
+        # Vertical: mortgage purchase and payoff
+        if _has_mortgage_data:
+            if 0 <= _m_purchase_yr <= horizon_years:
                 fig_dca.add_vline(
-                    x=current_age + _k_birth_yr,
-                    line_color=COLORS["pink"], line_dash="dash", line_width=1,
-                    annotation_text=f"Child {_k_yr_key} born",
-                    annotation_font_color=COLORS["pink"],
-                    annotation_position="top left" if _k_yr_key == 1 else "top right",
+                    x=current_age + _m_purchase_yr,
+                    line_color="rgba(210,120,40,0.7)", line_dash="dash", line_width=1,
+                    annotation_text="House purchased",
+                    annotation_font_color="rgba(210,120,40,0.9)",
+                    annotation_position="top left",
                 )
+            if 0 <= _m_payoff_yr <= horizon_years:
+                fig_dca.add_vline(
+                    x=current_age + _m_payoff_yr,
+                    line_color="rgba(210,120,40,0.7)", line_dash="dot", line_width=1,
+                    annotation_text="Mortgage paid off → DCA jumps",
+                    annotation_font_color="rgba(210,120,40,0.9)",
+                    annotation_position="top right",
+                )
+
+        # Vertical: kids' birth years
+        if _kids_enabled:
+            for _k_idx, _k_pf_key in enumerate(
+                ["pf_kid1_birth_yr_from_now", "pf_kid2_birth_yr_from_now", "pf_kid3_birth_yr_from_now"],
+                start=1,
+            ):
+                if _k_idx > int(profile.get("pf_num_kids") or 2):
+                    break
+                _k_birth_yr = int(profile.get(_k_pf_key) or (_k_idx * 3))
+                if 0 <= _k_birth_yr <= horizon_years:
+                    fig_dca.add_vline(
+                        x=current_age + _k_birth_yr,
+                        line_color=COLORS["pink"], line_dash="dash", line_width=1,
+                        annotation_text=f"Child {_k_idx} born",
+                        annotation_font_color=COLORS["pink"],
+                        annotation_position="top left" if _k_idx == 1 else "top right",
+                    )
 
         fig_dca.update_layout(
             **CHART_LAYOUT,
-            barmode="overlay",
+            barmode="stack",
             xaxis=dict(title="Age", dtick=5),
             yaxis=dict(tickformat="$,.0f", title="Annual Investment (Real AUD)"),
-            hovermode="x unified", height=340,
+            hovermode="x unified", height=380,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
         st.plotly_chart(fig_dca, width="stretch")
-        st.caption(
-            "Blue line = what actually gets invested each year after kids costs are deducted. "
-            "Red bars = the portion of your DCA budget consumed by kids costs. "
-            "Dotted line = what you'd invest if you had no kids. "
-            "The portfolio simulation uses the blue line, so slower growth during kids years is already modelled."
+
+        _cap_parts = [
+            "**Blue area** = what actually reaches your portfolio each year.",
+        ]
+        if _has_mortgage_data:
+            _cap_parts.append(
+                "**Orange bars** = mortgage repayments locked out of investing (already deducted from your investable surplus). "
+                f"After payoff at age {current_age + _m_payoff_yr}, that cash boosts your DCA."
+            )
+        if _kids_enabled:
+            _cap_parts.append(
+                "**Red bars** = portion of your surplus consumed by kids costs each year."
+            )
+        _cap_parts.append(
+            "**Dotted line** = ceiling DCA with no obligations (what you'd invest if neither applied). "
+            "The portfolio simulation uses the blue line, so all drags are already modelled."
         )
+        st.caption("  \n".join(_cap_parts))
 
 lean_num    = lean_fire_target(lean_spending, swr)
 fat_num     = fat_fire_target(fat_spending, swr)
