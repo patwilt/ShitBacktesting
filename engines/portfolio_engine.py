@@ -173,8 +173,12 @@ def run_yearly_projection(
         current_inf_denominator = (inf_factor ** year) if adjust_inflation else 1.0
 
         # Reduce effective DCA by any per-year cost overrides (kids costs, etc.)
-        year_extra_cost = float((annual_cost_overrides or {}).get(year, 0.0))
-        effective_monthly_dca = max(current_monthly_dca - year_extra_cost / 12.0, 0.0)
+        # annual_cost_overrides values are in real (today's) dollars; current_monthly_dca
+        # is nominal. Convert costs to nominal before subtracting so both are in the same
+        # dollar base — this indexes kids costs to inflation correctly.
+        year_extra_cost_real = float((annual_cost_overrides or {}).get(year, 0.0))
+        year_extra_cost_nominal = year_extra_cost_real * current_inf_denominator
+        effective_monthly_dca = max(current_monthly_dca - year_extra_cost_nominal / 12.0, 0.0)
 
         year_row["Salary"] = current_salary / current_inf_denominator
         year_row["Yearly_DCA"] = (effective_monthly_dca * 12.0) / current_inf_denominator
